@@ -1,0 +1,4 @@
+*.xlsx
+*.json
+scratch/
+.env
