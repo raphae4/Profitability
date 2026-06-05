@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- Styles -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style_v6.css">
 </head>
 <body>
     <div class="app-container">
@@ -47,7 +47,7 @@
         </aside>
 
         <!-- Main Content Area -->
-        <main class="main-content">
+        <main class="main-content" style="position: relative;">
             <!-- Header -->
             <header class="top-header glass-panel">
                 <div class="header-titles">
@@ -203,8 +203,9 @@
                             <!-- Dynamically populated -->
                         </select>
                     </div>
-                    <div style="margin-left: auto;">
-                        <button id="btnOpenReport" class="btn-primary" style="padding: 10px 20px; font-weight: 500;">📋 분석 보고서</button>
+                    <div style="margin-left: auto; display: flex; gap: 12px; align-items: center;">
+                        <button id="btnOpenComparativeAnalysis" class="btn-danger" style="padding: 10px 20px;"><span style="margin-right: 6px; font-size: 1.1em;">📊</span> 품목간 비교</button>
+                        <button id="btnOpenReport" class="btn-primary" style="padding: 10px 20px;"><span style="margin-right: 6px; font-size: 1.1em;">📋</span> 분석 보고서</button>
                     </div>
                 </section>
                 
@@ -338,7 +339,7 @@
                 </section>
 
                 <!-- Detected Issues Dynamic Grid -->
-                <section class="issues-grid" id="detectedIssuesGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 24px;">
+                <section class="issues-grid" id="detectedIssuesGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
                     <!-- Dynamically populated from JS -->
                     <div class="no-data-placeholder glass-panel" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
                         <span style="font-size: 2.5rem; display: block; margin-bottom: 16px;">📂</span>
@@ -347,8 +348,13 @@
                     </div>
                 </section>
 
-                <!-- Exchange Rate Sensitivity Simulator -->
-                <section class="simulator-section glass-panel" style="margin-top: 24px; padding: 24px;">
+                <!-- Exchange Rate Sensitivity & Simulator Section -->
+                <div id="exchangeRateSection" style="display: none; margin-top: 24px;">
+                    <!-- Sensitivity Card (Populated by JS) -->
+                    <div id="exchangeRateSensitivityCard" style="margin-bottom: 20px;"></div>
+
+                    <!-- Exchange Rate Sensitivity Simulator -->
+                    <section class="simulator-section glass-panel" style="padding: 24px;">
                     <div class="sim-header" style="margin-bottom: 20px;">
                         <h3>대화형 USD 환율 변동성 시뮬레이터 (KRW/USD Sensitivity)</h3>
                         <p style="color: var(--text-secondary); margin-top: 4px;">
@@ -406,9 +412,59 @@
                     </div>
                 </section>
             </div>
+            <!-- End of reportView -->
+            </div>
+
+            <!-- Comparative Analysis View -->
+            <div id="comparativeAnalysisView" class="view-section">
+                <div style="display: flex; gap: 24px; align-items: flex-start;">
+                    <!-- Left Column -->
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;" class="glass-panel report-header">
+                            <div>
+                                <h2 style="margin: 0;">지능형 다중 조건 품목간 비교</h2>
+                                <p style="color: var(--text-secondary); margin-top: 4px;">복수의 품목에 대해 특정 기간별 단가 변화를 한눈에 비교 분석할 수 있습니다.</p>
+                            </div>
+                        </div>
+
+                        <!-- Conditions and Result Table -->
+                        <div style="display: flex; flex-direction: column; gap: 24px;">
+                            <!-- Configuration Slots and Result Table -->
+                            <div class="comp-config-panel glass-panel" style="padding: 24px;">
+                                <h3 style="margin-top: 0; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; font-size: 1.1rem;">조건 설정 및 비교 결과</h3>
+                            
+                            
+                                <div class="table-scroll-wrapper" style="margin-top: 24px;">
+                                    <table class="rate-table" id="comparativeTable" style="width: 100%; white-space: nowrap;">
+                                        <thead id="comparativeTableHead">
+                                            <!-- Dynamic Columns -->
+                                        </thead>
+                                        <tbody id="comparativeTableBody">
+                                            <!-- Dynamic Rows -->
+                                            <tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-secondary);">우측 메뉴 트리에서 계정을 체크하고, 위에서 조건을 설정해 주세요.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column (Account Select) -->
+                    <section class="glass-panel account-select-section" style="width: 250px; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 24px; max-height: calc(100vh - 48px);">
+                        <div class="account-select-header" style="margin-bottom: 12px;">
+                            <h3 style="font-size: 1.05rem;">계정 조합 선택</h3>
+                            <p style="font-size: 0.8rem; margin-top: 6px; line-height: 1.4;">항목을 체크하여 품목간 비교 대상을 선택하세요.</p>
+                        </div>
+                        <div class="account-grid" id="compAccountGrid" style="flex: 1; overflow-y: auto; max-height: none;">
+                            <!-- Tree Checkboxes populated here -->
+                        </div>
+                    </section>
+                </div>
+            </div>
+
         </main>
     </div>
 
-    <script src="app.js?v=2"></script>
+    <script src="app_v6.js"></script>
 </body>
 </html>

@@ -81,6 +81,7 @@ const els = {
     uaEndMonth: document.getElementById('uaEndMonth'),
     uaCategoryFilter: document.getElementById('uaCategoryFilter'),
     uaAccountGrid: document.getElementById('uaAccountGrid'),
+    compAccountGrid: document.getElementById('compAccountGrid'),
 
     simRateSlider: document.getElementById('simRateSlider'),
     simRateVal: document.getElementById('simRateVal'),
@@ -137,6 +138,7 @@ function init() {
     }
     
     updateRateChart();
+    initComparativeAnalysis();
 }
 
 function initSettingsTab() {
@@ -974,71 +976,92 @@ function renderAccountCheckboxes() {
     });
 
     els.uaAccountGrid.innerHTML = html;
+    if (els.compAccountGrid) els.compAccountGrid.innerHTML = html;
 
-    // Accordion Logic
-    els.uaAccountGrid.querySelectorAll('.toggle-btn:not(.empty)').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            let targetKey = e.target.getAttribute('data-toggle');
-            let isExpanded = e.target.classList.contains('expanded');
-            
-            if (isExpanded) {
-                e.target.classList.remove('expanded');
-                e.target.innerText = '+';
-                els.uaAccountGrid.querySelectorAll('.account-item-wrapper').forEach(el => {
-                    let k = el.getAttribute('data-key');
-                    if (k !== targetKey && k.startsWith(targetKey + '_')) {
-                        el.style.display = 'none';
-                        let childBtn = el.querySelector('.toggle-btn');
-                        if (childBtn && !childBtn.classList.contains('empty')) {
-                            childBtn.classList.remove('expanded');
-                            childBtn.innerText = '+';
+    function bindGridEvents(grid) {
+        if (!grid) return;
+        
+        // Accordion Logic
+        grid.querySelectorAll('.toggle-btn:not(.empty)').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                let targetKey = e.target.getAttribute('data-toggle');
+                let isExpanded = e.target.classList.contains('expanded');
+                
+                if (isExpanded) {
+                    e.target.classList.remove('expanded');
+                    e.target.innerText = '+';
+                    grid.querySelectorAll('.account-item-wrapper').forEach(el => {
+                        let k = el.getAttribute('data-key');
+                        if (k !== targetKey && k.startsWith(targetKey + '_')) {
+                            el.style.display = 'none';
+                            let childBtn = el.querySelector('.toggle-btn');
+                            if (childBtn && !childBtn.classList.contains('empty')) {
+                                childBtn.classList.remove('expanded');
+                                childBtn.innerText = '+';
+                            }
                         }
+                    });
+                } else {
+                    e.target.classList.add('expanded');
+                    e.target.innerText = '-';
+                    grid.querySelectorAll(`.account-item-wrapper[data-parent-key="${targetKey}"]`).forEach(el => {
+                        el.style.display = 'flex';
+                    });
+                }
+            });
+        });
+
+        // Checkbox Tree Logic
+        grid.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+            chk.addEventListener('change', (e) => {
+                // Read from THIS grid only
+                let newlySelected = [];
+                grid.querySelectorAll('input[type="checkbox"]:checked').forEach(c => {
+                    newlySelected.push(c.value);
+                });
+                
+                if (newlySelected.length === 0) {
+                    State.unitAnalysis.selectedAccounts = ['매출액', '영업이익'];
+                    renderAccountCheckboxes();
+                    if (typeof runComparativeAnalysis === 'function') {
+                        runComparativeAnalysis();
+                    }
+                    return;
+                }
+                
+                State.unitAnalysis.selectedAccounts = newlySelected;
+                
+                // Sync ALL other instances directly
+                [els.uaAccountGrid, els.compAccountGrid, document.getElementById('accountSelector')].forEach(g => {
+                    if (g && g !== grid) {
+                        g.querySelectorAll('input[type="checkbox"]').forEach(c => {
+                            c.checked = newlySelected.includes(c.value);
+                        });
                     }
                 });
-            } else {
-                e.target.classList.add('expanded');
-                e.target.innerText = '-';
-                els.uaAccountGrid.querySelectorAll(`.account-item-wrapper[data-parent-key="${targetKey}"]`).forEach(el => {
-                    el.style.display = 'flex';
-                });
-            }
-        });
-    });
-
-    // Checkbox Tree Logic
-    els.uaAccountGrid.querySelectorAll('input[type="checkbox"]').forEach(chk => {
-        chk.addEventListener('change', (e) => {
-            let val = e.target.value;
-            let group = e.target.closest('.tree-group');
-            let isChecking = e.target.checked;
-            
-            // Auto-check logic removed as per user request (parents don't auto-select children)
-
-            // Sync State with DOM checks
-            let newlySelected = [];
-            els.uaAccountGrid.querySelectorAll('input[type="checkbox"]:checked').forEach(c => {
-                newlySelected.push(c.value);
+                
+                updateCheckboxIndeterminateStates();
+                updateUnitAnalysis();
+                updateDashboard();
+                if (typeof runComparativeAnalysis === 'function') {
+                    runComparativeAnalysis();
+                }
             });
-            
-            State.unitAnalysis.selectedAccounts = newlySelected;
-
-            if (State.unitAnalysis.selectedAccounts.length === 0) {
-                State.unitAnalysis.selectedAccounts = ['매출액', '영업이익'];
-                renderAccountCheckboxes();
-                return;
-            }
-            updateCheckboxIndeterminateStates();
-            updateUnitAnalysis();
-            updateDashboard();
         });
-    });
+    }
+
+    bindGridEvents(els.uaAccountGrid);
+    bindGridEvents(els.compAccountGrid);
 
     function updateCheckboxIndeterminateStates() {
-        let allCheckboxes = els.uaAccountGrid.querySelectorAll('input[type="checkbox"]');
-        allCheckboxes.forEach(chk => {
-            let key = chk.value;
-            let hasSelectedChild = Array.from(allCheckboxes).some(c => c.checked && c.value !== key && c.value.startsWith(key + '_'));
-            chk.indeterminate = hasSelectedChild && !chk.checked;
+        [els.uaAccountGrid, els.compAccountGrid].forEach(grid => {
+            if (!grid) return;
+            let allCheckboxes = grid.querySelectorAll('input[type="checkbox"]');
+            allCheckboxes.forEach(chk => {
+                let key = chk.value;
+                let hasSelectedChild = Array.from(allCheckboxes).some(c => c.checked && c.value !== key && c.value.startsWith(key + '_'));
+                chk.indeterminate = hasSelectedChild && !chk.checked;
+            });
         });
     }
 
@@ -1445,234 +1468,223 @@ function runIssueDetection() {
     let periodLength = eIdx - sIdx + 1;
 
     let tc = State.processedData.totalCompany;
-
-    State.processedData.categories.forEach(cat => {
-        if (cat === tc) return;
-
-        let fin = State.processedData.financials[cat];
-        if (!fin) return;
-
-        let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
-        let varMfg = extractPeriodicData(fin['변동제조비']?.data).slice(sIdx, eIdx + 1);
-        
-        let varSell = new Array(periodLength).fill(0);
-        Object.keys(fin).forEach(k => {
-            if (k.startsWith('변동판매비')) {
-                let d = extractPeriodicData(fin[k]?.data).slice(sIdx, eIdx + 1);
-                for(let i=0; i<periodLength; i++) varSell[i] += d[i] || 0;
-            }
-        });
-
-        let fixedMfg = extractPeriodicData(fin['고정제조비']?.data).slice(sIdx, eIdx + 1);
-        
-        let fixedSell = new Array(periodLength).fill(0);
-        let genAdmin = new Array(periodLength).fill(0);
-        Object.keys(fin).forEach(k => {
-            if (k.startsWith('고정판매비')) {
-                let d = extractPeriodicData(fin[k]?.data).slice(sIdx, eIdx + 1);
-                for(let i=0; i<periodLength; i++) fixedSell[i] += d[i] || 0;
-            }
-            if (k.startsWith('일반관리비')) {
-                let d = extractPeriodicData(fin[k]?.data).slice(sIdx, eIdx + 1);
-                for(let i=0; i<periodLength; i++) genAdmin[i] += d[i] || 0;
-            }
-        });
-
-        let totalSales = sales.reduce((a, b) => a + b, 0);
-        let totalVarMfg = varMfg.reduce((a, b) => a + b, 0);
-        let totalVarSell = varSell.reduce((a, b) => a + b, 0);
-        let totalFixedMfg = fixedMfg.reduce((a, b) => a + b, 0);
-        let totalFixedSell = fixedSell.reduce((a, b) => a + b, 0);
-        let totalGenAdmin = genAdmin.reduce((a, b) => a + b, 0);
-
-        let totalVariable = totalVarMfg + totalVarSell;
-        let totalFixed = totalFixedMfg + totalFixedSell + totalGenAdmin;
-        let marginalProfit = totalSales - totalVariable;
-        let marginalProfitRatio = totalSales ? (marginalProfit / totalSales * 100).toFixed(1) : '0.0';
-
-        // 1. Check if Marginal Loss exists
-        if (totalSales > 0 && marginalProfit < 0) {
-            dangerCount++;
-            issues.push({
-                level: 'danger',
-                badge: '위험',
-                title: `품목분류 [${cat}] 한계적자 발생`,
-                desc: `조회 기간 동안 총 매출액은 ${formatCurr(totalSales)}이나, 변동비가 매출을 초과하여 ${formatCurr(totalVariable)} (${((totalVariable/totalSales)*100).toFixed(1)}%)에 달해 한계이익 적자 ${formatCurr(marginalProfit)} (한계이익률 ${marginalProfitRatio}%)를 기록하고 있습니다. 이는 생산을 늘릴수록 손실이 누적되는 적자수주 상태입니다.`,
-                action: {
-                    title: '추천 조치 계획',
-                    p: '• 1단계: 부자재 및 물류비 소요 단위 BOM 정밀 재검증 및 단가 긴급 재협상<br>• 2단계: 자동화 공정 재배치를 통한 현장 생산인력 효율 개선 및 직접 변동비 축소<br>• 3단계: 단가 보전이 안 되는 적자 제품의 수주량을 통제하고 고수익 품목으로 전환 생산'
-                }
-            });
-        }
-
-        // 2. Check if Fixed Cost Burden is too high (> 30%)
-        let fixedRatio = totalSales ? (totalFixed / totalSales) : 0;
-        if (totalSales > 0 && fixedRatio > 0.30 && marginalProfit >= 0) {
-            warningCount++;
-            issues.push({
-                level: 'warning',
-                badge: '주의',
-                title: `품목분류 [${cat}] 고정비 부담 과다 경보`,
-                desc: `조회 기간 동안 매출액 ${formatCurr(totalSales)} 대비 고정비가 ${formatCurr(totalFixed)} (${(fixedRatio*100).toFixed(1)}%)로 내부 경보 기준치(30%)를 초과하고 있습니다. 가동률 하락 시 바로 대규모 영업 손실로 이어질 우려가 큽니다.`,
-                action: {
-                    title: '추천 조치 계획',
-                    p: '• 1단계: 유휴 설비 자산의 타 라인 이설 또는 처분을 통한 감가상각 부담 축소<br>• 2단계: 간접인력 최적 배치 및 고정 제경비 항목에 대한 제로베이스 원가 절감 정밀 실사<br>• 3단계: 생산 변동성에 유연하게 대처할 수 있도록 외주 가공 비중 전환 검토'
-                }
-            });
-        }
-    });
-
-    // 3. Check for Tet holiday impact (2월)
-    if (State.processedData.financials[tc]) {
-        let fin = State.processedData.financials[tc];
-        let salesData = extractPeriodicData(fin['매출액']?.data);
-
-        let startY = parseInt(State.ui.startYear);
-        let endY = parseInt(State.ui.endYear);
-
-        for (let y = Math.max(2024, startY); y <= Math.min(2026, endY); y++) {
-            let yBase = (y - 2024) * 12;
-            let janSales = salesData[yBase + 0] || 0;
-            let febSales = salesData[yBase + 1] || 0;
-            let marSales = salesData[yBase + 2] || 0;
-
-            let avgJanMar = (janSales + marSales) / 2;
-            if (avgJanMar > 0 && febSales / avgJanMar < 0.75) {
-                let dropPct = ((1 - febSales / avgJanMar) * 100).toFixed(1);
-                warningCount++;
-                issues.push({
-                    level: 'warning',
-                    badge: '주의',
-                    title: `${y}년 2월 구정(Tet) 조업도 손실 분석`,
-                    desc: `${y}년 2월 베트남 법인 매출액은 ${formatCurr(febSales)}로, 전후 월(1월, 3월) 평균 매출 ${formatCurr(avgJanMar)} 대비 ${dropPct}% 급감하였습니다. 베트남 구정 연휴(Tet) 동안 가동 중단에 따른 생산 비조업 손실이 주 원인입니다.`,
-                    action: {
-                        title: '추천 조치 계획',
-                        p: '• 1단계: 구정 전후 집중 생산 추진 및 조기 재고 구축으로 출하 차질 최소화<br>• 2단계: 연휴 직후 조기 복귀 인센티브 지원 등을 통해 라인 셋업 시간을 단축하여 가동률 복구<br>• 3단계: 2월 한 달에 집중 배부되는 감가상각 고정비를 연간 조업도 배부 방식으로 보완 검토'
-                    }
-                });
-            }
-        }
-    }
-
-    // 4. Exchange Rate Sensitivity Analysis
+    let selCat = State.ui.selectedCategory || tc;
+    
+    // --- 환율 변동성 민감도 고정 섹션 (항상 하단 표시) ---
+    let exchangeRateSection = document.getElementById('exchangeRateSection');
+    let exchangeRateSensitivityCard = document.getElementById('exchangeRateSensitivityCard');
+    
     if (State.processedData.financials[tc]) {
         let fin = State.processedData.financials[tc];
         let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
         let opProfit = extractPeriodicData(fin['영업이익']?.data).slice(sIdx, eIdx + 1);
-
         let totalSales = sales.reduce((a, b) => a + b, 0);
         let totalOpProfit = opProfit.reduce((a, b) => a + b, 0);
 
-        if (totalSales > 0) {
-            infoCount++;
+        if (totalSales > 0 && exchangeRateSection && exchangeRateSensitivityCard) {
+            exchangeRateSection.style.display = 'block';
             let rateDeclineImpact = totalOpProfit * 0.1;
-
-            issues.push({
-                level: 'info',
-                badge: '정보',
-                title: '환율(KRW/USD) 변동에 따른 영업이익 민감도',
-                desc: `현재 조회 기간의 베트남 법인 총 매출은 ${formatCurr(totalSales)}이며 원화 영업이익은 ${formatCurr(totalOpProfit)}입니다. 베트남 법인의 제품 판가(수출) 및 주요 원부자재 결제 통화는 미국 달러(USD) 기반이므로, KRW/USD 환율이 10% 상승할 시 원화 환산 영업이익이 약 ${formatCurr(rateDeclineImpact)} 증가하며, 10% 하락할 시 동일 금액만큼 감소하는 고민감 리스크 구조입니다.`,
-                action: {
-                    title: '추천 위험 관리 계획',
-                    p: '• 1단계: KRW/USD 환율 가상 시뮬레이터를 활용한 원화 변동성 정기 모니터링 체계 가동<br>• 2단계: 현지 내수 매출 확대 및 결제 통화 포트폴리오 다변화로 특정 외환 의존도 감소<br>• 3단계: 환변동 보험 가입 또는 은행 연계 통화선도 계약을 통해 연간 경영계획 목표 손익 선제적 방어'
-                }
-            });
+            let sensitivityHtml = `
+                <div class="issue-card glass-panel info">
+                    <div class="issue-card-header">
+                        <h4 class="issue-title"><span class="issue-badge info">정보</span>환율(KRW/USD) 변동에 따른 영업이익 민감도</h4>
+                    </div>
+                    <p class="issue-desc">현재 조회 기간의 베트남 법인 총 매출은 ${formatCurr(totalSales)}이며 원화 영업이익은 ${formatCurr(totalOpProfit)}입니다. 베트남 법인의 제품 판가(수출) 및 주요 원부자재 결제 통화는 미국 달러(USD) 기반이므로, KRW/USD 환율이 10% 상승할 시 원화 환산 영업이익이 약 ${formatCurr(rateDeclineImpact)} 증가하며, 10% 하락할 시 동일 금액만큼 감소하는 고민감 리스크 구조입니다.</p>
+                    <div class="issue-action-box">
+                        <strong>추천 위험 관리 계획</strong>
+                        <p>• 1단계: 하단의 KRW/USD 환율 가상 시뮬레이터를 활용한 원화 변동성 정기 모니터링 체계 가동<br>• 2단계: 현지 내수 매출 확대 및 결제 통화 포트폴리오 다변화로 특정 외환 의존도 감소<br>• 3단계: 환변동 보험 가입 또는 은행 연계 통화선도 계약을 통해 연간 경영계획 목표 손익 선제적 방어</p>
+                    </div>
+                </div>
+            `;
+            exchangeRateSensitivityCard.innerHTML = sensitivityHtml;
+        } else if (exchangeRateSection) {
+            exchangeRateSection.style.display = 'none';
         }
+    } else if (exchangeRateSection) {
+        exchangeRateSection.style.display = 'none';
     }
 
-    // 5. Account-level Analysis for Selected Category and Period
-    let selCat = State.ui.selectedCategory;
+    // --- 11대 핵심 지표 분석 엔진 (Option B: 문제 발생 시 카드 표시) ---
     if (selCat && State.processedData.financials[selCat]) {
         let fin = State.processedData.financials[selCat];
-        let salesData = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
-        let totalSales = salesData.reduce((a, b) => a + b, 0);
+        
+        let m = {
+            sales: 0, valLoss: 0, grossProfit: 0, varMfg: 0, fixedMfg: 0, 
+            sga: 0, material: 0, labor: 0, others: 0, marginalProfit: 0, 
+            deprecMaintInd: 0, bep: 0, opProfit: 0,
+            salesData: [], opProfitData: []
+        };
 
-        let totalCostsAll = 0;
-        let accountStats = [];
-
+        // 데이터 집계 (Aggregation)
         Object.keys(fin).forEach(accKey => {
             let accObj = fin[accKey];
-            let isRevenueOrProfit = accObj.label.includes('매출') || accObj.label.includes('이익') || accObj.label.includes('손익');
-            if (isRevenueOrProfit) return;
-
+            let lbl = accObj.label.replace(/\s+/g, '');
             let d = extractPeriodicData(accObj.data).slice(sIdx, eIdx + 1);
-            let accTotal = d.reduce((a, b) => a + b, 0);
-            
-            if (accTotal <= 0) return;
+            let total = d.reduce((a, b) => a + b, 0);
 
-            // Only consider lowest level accounts
-            if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
-                totalCostsAll += accTotal;
-                accountStats.push({
-                    key: accKey,
-                    label: accObj.label.replace(/\s+/g, ''),
-                    data: d,
-                    total: accTotal
-                });
+            if (lbl === '매출액') { m.sales += total; m.salesData = d; }
+            else if (lbl === '제품평가손실') m.valLoss += total;
+            else if (lbl === '매출이익') m.grossProfit += total;
+            else if (lbl === '영업이익') { m.opProfit += total; m.opProfitData = d; }
+            else if (lbl === '손익분기점') m.bep += total;
+            else if (lbl === '한계이익') m.marginalProfit += total;
+            else if (accKey.startsWith('변동제조비') && accObj.level === 1) m.varMfg += total;
+            else if (accKey.startsWith('고정제조비') && accObj.level === 1) m.fixedMfg += total;
+            else if ((lbl.includes('판매비') || lbl.includes('일반관리비')) && accObj.level === 1) m.sga += total;
+
+            // 5. 재료비 (원재료비, 부재료비, 직접포장비 등)
+            if (lbl.includes('원재료비') || lbl.includes('부재료비') || lbl.includes('직접포장비')) {
+                if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
+                    m.material += total;
+                }
+            }
+
+            // 6. 통합 노무비 (노무비, 복리비, 복리후생비, 급여, 인건비)
+            if (lbl.includes('노무비') || lbl.includes('복리') || lbl.includes('급여') || lbl.includes('인건비')) {
+                if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
+                    m.labor += total;
+                }
+            }
+
+            // 7. 기타 주요 경비 (외주가공비, 전력비, 소모품비, 포장비, 외주요역비, 일반가공비, 소모공구비, Royalty)
+            if (lbl.includes('외주가공비') || lbl.includes('전력비') || lbl.includes('소모품비') || lbl.includes('포장비') || lbl.includes('외주요역비') || lbl.includes('일반가공비') || lbl.includes('소모공구비') || lbl.includes('Royalty') || lbl.includes('로열티')) {
+                if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
+                    m.others += total;
+                }
+            }
+
+            // 9. 감가상각, 수선, 간접인건비
+            if (lbl.includes('감가상각비') || lbl.includes('수선비') || lbl.includes('간접인건비')) {
+                if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
+                    m.deprecMaintInd += total;
+                }
             }
         });
 
-        accountStats.forEach(acc => {
-            // Check 2: High Impact Account (>= 20% of total costs)
-            let costRatio = totalCostsAll > 0 ? (acc.total / totalCostsAll) : 0;
-            if (costRatio >= 0.20) {
-                infoCount++;
-                issues.push({
-                    level: 'info',
-                    badge: '정보',
-                    title: `[${selCat}] 비중 과다 핵심 비용: ${acc.label}`,
-                    desc: `해당 조회 기간 동안 '${acc.label}' 계정의 총 지출액은 ${formatCurr(acc.total)}으로, 전체 비용의 ${(costRatio * 100).toFixed(1)}%를 차지하는 핵심 비용입니다.`,
-                    action: {
-                        title: '추천 원가 관리 계획',
-                        p: `• 1단계: ${acc.label} 발생 원인 및 단가/수량(P/Q) 변동 요인 정밀 분석<br>• 2단계: 동종 업계 벤치마킹 및 대체 공정/공급사 발굴 검토`
-                    }
-                });
-            }
+        // --- 알고리즘 기반 리스크 감지(Issue Detection) ---
+        
+        // 1. BEP Overrun (10. 손익분기점 미달)
+        if (m.sales > 0 && m.bep > 0 && m.sales < m.bep) {
+            dangerCount++;
+            issues.push({
+                level: 'danger',
+                badge: '위험',
+                title: `[${selCat}] 10. 손익분기점(BEP) 미달`,
+                desc: `조회 기간의 총 매출액(${formatCurr(m.sales)})이 손익분기점(${formatCurr(m.bep)})에 미달하여 구조적인 영업손실이 발생하고 있습니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 변동비 및 고정비 절감 한계치 재평가<br>• 2단계: 손익분기점을 초과할 수 있도록 최소 수주 물량(Q) 확보 및 단가(P) 인상 협상' }
+            });
+        }
 
-            // Check 1: Spike Detection (>= 100% increase over average)
-            if (periodLength >= 2) {
-                let currentMonthVal = acc.data[periodLength - 1];
-                let previousMonthsSum = acc.total - currentMonthVal;
-                let previousMonthsAvg = previousMonthsSum / (periodLength - 1);
+        // 2. Marginal Profit Loss (8. 한계적자 발생)
+        if (m.sales > 0 && m.marginalProfit < 0) {
+            dangerCount++;
+            issues.push({
+                level: 'danger',
+                badge: '위험',
+                title: `[${selCat}] 8. 한계이익 적자 발생`,
+                desc: `조회 기간 동안 변동비가 매출을 초과하여 한계이익 적자 ${formatCurr(m.marginalProfit)}를 기록 중입니다. 생산을 늘릴수록 손실이 누적됩니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 부자재 및 물류비 소요 단위 BOM 정밀 재검증 및 단가 긴급 재협상<br>• 2단계: 적자 제품의 수주량을 통제하고 고수익 품목으로 전환 생산' }
+            });
+        }
 
-                if (previousMonthsAvg > 0 && currentMonthVal >= previousMonthsAvg * 2.0) {
-                    let spikeRatio = ((currentMonthVal - previousMonthsAvg) / previousMonthsAvg * 100).toFixed(1);
+        // 3. Gross Profit & Operating Profit Loss (3, 11. 매출이익/영업이익 적자)
+        if (m.sales > 0 && m.grossProfit < 0) {
+            dangerCount++;
+            issues.push({
+                level: 'danger',
+                badge: '위험',
+                title: `[${selCat}] 3. 매출이익 적자 발생`,
+                desc: `매출액 대비 제조원가가 초과하여 매출이익이 적자(${formatCurr(m.grossProfit)}) 상태입니다. 제품을 팔수록 원가 손실이 커집니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 직접 재료비 및 노무비 등 핵심 제조원가 낭비 요인 즉각 실사<br>• 2단계: 채산성 한계 제품 단종 및 수익성 위주 포트폴리오 재편' }
+            });
+        }
+        if (m.sales > 0 && m.opProfit < 0 && m.grossProfit >= 0) {
+            warningCount++;
+            issues.push({
+                level: 'warning',
+                badge: '주의',
+                title: `[${selCat}] 11. 영업이익 적자 발생`,
+                desc: `매출이익은 흑자이나, 판관비 등 과다 지출로 인해 영업이익이 적자(${formatCurr(m.opProfit)})를 기록 중입니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 고정 판매비 및 일반관리비 등 간접 경비 제로베이스 예산 통제<br>• 2단계: 조직 슬림화 및 비효율 지원 인력 감축 검토' }
+            });
+        }
+
+        // 4. Product Valuation Loss Spike (2. 제품평가손실 비중 과다)
+        if (m.sales > 0 && m.valLoss > 0 && (m.valLoss / m.sales) > 0.05) {
+            warningCount++;
+            issues.push({
+                level: 'warning',
+                badge: '주의',
+                title: `[${selCat}] 2. 제품평가손실 비중 과다`,
+                desc: `제품평가손실(${formatCurr(m.valLoss)})이 매출의 ${((m.valLoss/m.sales)*100).toFixed(1)}%를 초과하여 재고 자산 건전성이 악화되고 있습니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 장기 체화 재고 및 불량품 현황 전수 조사<br>• 2단계: 재고 덤핑 매각 또는 폐기 처리를 통한 추가 손실 차단' }
+            });
+        }
+
+        // 5. Labor Cost Burden (6. 통합 노무비 부담 과다)
+        if (m.sales > 0 && m.labor > 0 && (m.labor / m.sales) > 0.20) {
+            infoCount++;
+            issues.push({
+                level: 'info',
+                badge: '정보',
+                title: `[${selCat}] 6. 통합 노무비 부담 과다`,
+                desc: `변동/고정/판관비를 통틀어 투입된 총 노무비(복리후생 포함)가 ${formatCurr(m.labor)}으로 매출의 ${((m.labor/m.sales)*100).toFixed(1)}%에 달합니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 공정 라인 자동화율 점검 및 잉여 인력 효율화<br>• 2단계: 잔업/특근 등 변동 인건비 통제 및 유연근무제 도입' }
+            });
+        }
+
+        // 6. Material Cost Burden (5. 재료비 비중 과다)
+        if (m.sales > 0 && m.material > 0 && (m.material / m.sales) > 0.40) {
+            infoCount++;
+            issues.push({
+                level: 'info',
+                badge: '정보',
+                title: `[${selCat}] 5. 재료비 비중 과다`,
+                desc: `핵심 재료비(원재료, 부재료 등)가 ${formatCurr(m.material)}으로 매출의 ${((m.material/m.sales)*100).toFixed(1)}%를 차지하고 있습니다. 원자재가 상승 압력이 큽니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 원부자재 글로벌 소싱 다변화 및 대량 구매 단가 인하 협상<br>• 2단계: 제조 공정 수율(Yield) 개선 및 불량 폐기 감소 활동' }
+            });
+        }
+        
+        // 7. Other Major Expenses (7. 8대 기타 주요 경비 집중 관리)
+        if (m.sales > 0 && m.others > 0 && (m.others / m.sales) > 0.15) {
+            infoCount++;
+            issues.push({
+                level: 'info',
+                badge: '정보',
+                title: `[${selCat}] 7. 8대 기타 주요 경비 과다`,
+                desc: `외주가공, 전력비, 소모품 등 주요 경비 합산액이 ${formatCurr(m.others)}으로 매출의 ${((m.others/m.sales)*100).toFixed(1)}%를 차지합니다. 추가 절감 여력이 있는지 점검이 필요합니다.`,
+                action: { title: '추천 조치 계획', p: '• 1단계: 외주가공 공정의 내재화 검토 및 전력 누수 타임 개선<br>• 2단계: 소모공구 수명 연장 활동 및 비품 구매 승인 절차 강화' }
+            });
+        }
+
+        // 8. Tet Holiday Impact (2월 조업도 손실) - 매출액 기준
+        let startY = parseInt(State.ui.startYear);
+        let endY = parseInt(State.ui.endYear);
+        for (let y = Math.max(2024, startY); y <= Math.min(2026, endY); y++) {
+            let yBase = (y - 2024) * 12;
+            let targetIdxJan = yBase + 0 - sIdx;
+            let targetIdxFeb = yBase + 1 - sIdx;
+            let targetIdxMar = yBase + 2 - sIdx;
+            
+            if (targetIdxJan >= 0 && targetIdxMar < periodLength && m.salesData.length > 0) {
+                let janSales = m.salesData[targetIdxJan] || 0;
+                let febSales = m.salesData[targetIdxFeb] || 0;
+                let marSales = m.salesData[targetIdxMar] || 0;
+
+                let avgJanMar = (janSales + marSales) / 2;
+                if (avgJanMar > 0 && febSales / avgJanMar < 0.75) {
+                    let dropPct = ((1 - febSales / avgJanMar) * 100).toFixed(1);
                     warningCount++;
                     issues.push({
                         level: 'warning',
                         badge: '주의',
-                        title: `[${selCat}] 비용 급증 계정 경보: ${acc.label}`,
-                        desc: `조회 기간 마지막 달의 '${acc.label}' 지출액이 ${formatCurr(currentMonthVal)}으로, 이전 기간 평균(${formatCurr(previousMonthsAvg)}) 대비 ${spikeRatio}% 급증하였습니다.`,
-                        action: {
-                            title: '추천 조치 계획',
-                            p: `• 1단계: 전표 및 증빙 자료 대조를 통한 이상 지출 내역 점검<br>• 2단계: 일시적 비용 여부 파악 및 익월 비용 발생 통제 강화`
-                        }
+                        title: `[${selCat}] 1. ${y}년 2월 구정(Tet) 조업도 손실`,
+                        desc: `${y}년 2월 매출액은 ${formatCurr(febSales)}로, 전후 월(1,3월) 평균 매출 ${formatCurr(avgJanMar)} 대비 ${dropPct}% 급감하였습니다. 가동 중단에 따른 비조업 손실이 주 원인입니다.`,
+                        action: { title: '추천 조치 계획', p: '• 1단계: 구정 전후 집중 생산 추진 및 조기 재고 구축으로 출하 차질 최소화<br>• 2단계: 조기 복귀 인센티브 지원 등을 통해 가동률 복구' }
                     });
                 }
             }
-
-            // Check 3: Revenue Drop vs Cost Rise
-            if (periodLength >= 2 && totalSales > 0) {
-                let currentSales = salesData[periodLength - 1];
-                let previousSales = salesData[periodLength - 2];
-                let currentCost = acc.data[periodLength - 1];
-                let previousCost = acc.data[periodLength - 2];
-
-                if (previousSales > currentSales && currentCost > previousCost && previousCost > 0) {
-                    dangerCount++;
-                    issues.push({
-                        level: 'danger',
-                        badge: '위험',
-                        title: `[${selCat}] 매출 둔화 대비 원가 상승 역전: ${acc.label}`,
-                        desc: `전월 대비 매출은 감소(${formatCurr(previousSales)} → ${formatCurr(currentSales)})했음에도 불구하고, '${acc.label}' 계정의 지출액은 오히려 증가(${formatCurr(previousCost)} → ${formatCurr(currentCost)})하는 역전 현상이 감지되었습니다.`,
-                        action: {
-                            title: '긴급 원가 통제 계획',
-                            p: `• 1단계: 조업도 하락에도 감소하지 않는 원인 파악 및 즉각적인 비용 집행 동결<br>• 2단계: 변동비 성격의 계정일 경우, 매출 연동형 예산 통제 시스템 도입`
-                        }
-                    });
-                }
-            }
-        });
+        }
     }
 
     return { issues, dangerCount, warningCount, infoCount };
@@ -1799,4 +1811,293 @@ function formatShort(val) {
     if (val >= 1000000) return (val / 1000000).toFixed(1) + '백만';
     return Math.round(val).toLocaleString();
 }
+// ==========================================
+// Comparative Analysis (비교 분석) Module
+// ==========================================
+State.ui.comparativeSelections = [
+    { cat: '', startYear: '2026', startMonth: '04', endYear: '2026', endMonth: '04' },
+    { cat: '', startYear: '2026', startMonth: '04', endYear: '2026', endMonth: '04' },
+    { cat: '', startYear: '2026', startMonth: '04', endYear: '2026', endMonth: '04' },
+    { cat: '', startYear: '2026', startMonth: '04', endYear: '2026', endMonth: '04' },
+    { cat: '', startYear: '2026', startMonth: '04', endYear: '2026', endMonth: '04' }
+];
+
+function initComparativeAnalysis() {
+    let btnOpen = document.getElementById('btnOpenComparativeAnalysis');
+
+    if (btnOpen) {
+        btnOpen.addEventListener('click', () => {
+            switchTab('comparativeAnalysis');
+            
+            // Only try to render slots and accounts if data is loaded
+            if (State.processedData && State.processedData.categories && State.processedData.categories.length > 0) {
+                renderCompSlots();
+                
+                // Default select Sales and OpProfit if not selected
+                let hasSales = false, hasOpProfit = false;
+                if (!State.unitAnalysis.selectedAccounts) State.unitAnalysis.selectedAccounts = [];
+                
+                State.unitAnalysis.selectedAccounts.forEach(k => {
+                    if (k.includes('매출액') || k.includes('매출단가')) hasSales = true;
+                    if (k.includes('영업이익')) hasOpProfit = true;
+                });
+                
+                let tcFin = State.processedData.financials ? (State.processedData.financials[State.processedData.totalCompany] || {}) : {};
+                if (!hasSales) {
+                    let salesKey = Object.keys(tcFin).find(k => k.includes('매출액'));
+                    if(salesKey && !State.unitAnalysis.selectedAccounts.includes(salesKey)) State.unitAnalysis.selectedAccounts.push(salesKey);
+                }
+                if (!hasOpProfit) {
+                    let opKey = Object.keys(tcFin).find(k => k.includes('영업이익'));
+                    if(opKey && !State.unitAnalysis.selectedAccounts.includes(opKey)) State.unitAnalysis.selectedAccounts.push(opKey);
+                }
+                
+                // Sync all grids
+                [els.uaAccountGrid, els.compAccountGrid, document.getElementById('accountSelector')].forEach(g => {
+                    if (g) {
+                        g.querySelectorAll('input[type="checkbox"]').forEach(c => {
+                            c.checked = State.unitAnalysis.selectedAccounts.includes(c.value);
+                        });
+                    }
+                });
+                
+                runComparativeAnalysis();
+            } else {
+                let head = document.getElementById('comparativeTableHead');
+                let body = document.getElementById('comparativeTableBody');
+                if (head) head.innerHTML = '';
+                if (body) body.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 40px; color:var(--text-secondary);">먼저 엑셀 데이터를 업로드해주세요.</td></tr>';
+            }
+        });
+    }
+}
+
+function renderCompSlots() {
+    let container = document.getElementById('comparativeTableHead');
+    if (!container) return;
+    
+    let tc = State.processedData.totalCompany;
+    let cats = State.processedData.categories;
+    let catOptions = `<option value="">-- 품목분류 선택 --</option>`;
+    if (cats.includes(tc)) {
+        let displayName = tc === '성우비나()' ? '베트남법인' : tc;
+        catOptions += `<option value="${tc}">${displayName}</option>`;
+    }
+    cats.forEach(c => {
+        if (c !== tc) {
+            catOptions += `<option value="${c}">${formatCategoryLabel(c, false)}</option>`;
+        }
+    });
+    
+    let html = `<tr><th style="min-width: 180px; text-align: center; padding: 16px; font-size: 1.15rem; font-weight: 700; color: #fff; vertical-align: middle;">비교 항목 (단가 기준)</th>`;
+    for(let i=0; i<5; i++) {
+        let mOptions = '';
+        for(let m=1; m<=12; m++) {
+            let mStr = m.toString().padStart(2, '0');
+            mOptions += `<option value="${mStr}">${m}월</option>`;
+        }
+        
+        if (i > 0) html += `<th style="width: 16px; min-width: 16px; padding: 0; border: none; background: transparent;"></th>`;
+        html += `
+            <th style="min-width: 200px; padding: 16px; vertical-align: top; background: rgba(255,255,255,0.02); border-radius: 6px 6px 0 0;">
+                <div class="filter-group" style="text-align: left;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--accent-cyan); font-size: 0.9rem; text-align: center;">품목 ${i+1}</label>
+                    <select class="modern-select comp-cat" data-idx="${i}" style="width: 100%; margin-bottom: 8px;">
+                        ${catOptions}
+                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; gap: 4px;">
+                            <select class="modern-select comp-sy" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">
+                                <option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option>
+                            </select>
+                            <select class="modern-select comp-sm" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">${mOptions}</select>
+                        </div>
+                        <div style="text-align: center; color: rgba(255,255,255,0.85); font-size: 1.25rem; font-weight: 600; padding: 2px 0;">~</div>
+                        <div style="display: flex; gap: 4px;">
+                            <select class="modern-select comp-ey" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">
+                                <option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option>
+                            </select>
+                            <select class="modern-select comp-em" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">${mOptions}</select>
+                        </div>
+                    </div>
+                </div>
+            </th>
+        `;
+    }
+    html += `</tr>`;
+    container.innerHTML = html;
+
+    // Set initial values
+    for(let i=0; i<5; i++) {
+        let s = State.ui.comparativeSelections[i];
+        let catEl = container.querySelector(`.comp-cat[data-idx="${i}"]`);
+        if (catEl && Array.from(catEl.options).some(o => o.value === s.cat)) {
+            catEl.value = s.cat;
+        }
+        container.querySelector(`.comp-sy[data-idx="${i}"]`).value = s.startYear;
+        container.querySelector(`.comp-sm[data-idx="${i}"]`).value = s.startMonth;
+        container.querySelector(`.comp-ey[data-idx="${i}"]`).value = s.endYear;
+        container.querySelector(`.comp-em[data-idx="${i}"]`).value = s.endMonth;
+    }
+
+    // Attach listeners
+    container.querySelectorAll('select').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+            let idx = e.target.dataset.idx;
+            let targetClass = e.target.className;
+            let s = State.ui.comparativeSelections[idx];
+
+            if (targetClass.includes('comp-cat')) s.cat = e.target.value;
+            if (targetClass.includes('comp-sy')) s.startYear = e.target.value;
+            if (targetClass.includes('comp-sm')) s.startMonth = e.target.value;
+            if (targetClass.includes('comp-ey')) s.endYear = e.target.value;
+            if (targetClass.includes('comp-em')) s.endMonth = e.target.value;
+
+            // Date validation
+            let sIdx = (parseInt(s.startYear) - 2024) * 12 + (parseInt(s.startMonth) - 1);
+            let eIdx = (parseInt(s.endYear) - 2024) * 12 + (parseInt(s.endMonth) - 1);
+            
+            if (sIdx > eIdx) {
+                if (targetClass.includes('comp-ey') || targetClass.includes('comp-em')) {
+                    s.startYear = s.endYear;
+                    s.startMonth = s.endMonth;
+                    container.querySelector(`.comp-sy[data-idx="${idx}"]`).value = s.startYear;
+                    container.querySelector(`.comp-sm[data-idx="${idx}"]`).value = s.startMonth;
+                } else {
+                    s.endYear = s.startYear;
+                    s.endMonth = s.startMonth;
+                    container.querySelector(`.comp-ey[data-idx="${idx}"]`).value = s.endYear;
+                    container.querySelector(`.comp-em[data-idx="${idx}"]`).value = s.endMonth;
+                }
+            }
+
+            runComparativeAnalysis();
+        });
+    });
+}
+
+
+
+function runComparativeAnalysis() {
+    let head = document.getElementById('comparativeTableHead');
+    let body = document.getElementById('comparativeTableBody');
+    if (!head || !body) return;
+
+    let activeSlots = State.ui.comparativeSelections.filter(s => s.cat !== '');
+    if (activeSlots.length === 0) {
+        body.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 40px; color: var(--accent-red);">최소 1개 이상의 품목분류를 선택해주세요.</td></tr>`;
+        return;
+    }
+
+    let accountsToCompare = State.unitAnalysis.selectedAccounts ? State.unitAnalysis.selectedAccounts.slice() : [];
+    if (accountsToCompare.length === 0) {
+        body.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 40px; color: var(--accent-red);">최소 1개 이상의 계정을 선택해주세요.</td></tr>`;
+        return;
+    }
+
+    let tbodyHtml = '';
+    
+    let tcFin = State.processedData.financials[State.processedData.totalCompany] || {};
+    let orderedKeys = Object.keys(tcFin);
+    accountsToCompare.sort((a, b) => {
+        return orderedKeys.indexOf(a) - orderedKeys.indexOf(b);
+    });
+
+    let allSlots = State.ui.comparativeSelections; // Always 5 slots
+
+    let slotSalesSums = allSlots.map(slot => {
+        if (!slot.cat) return 0;
+        let sIdx = (parseInt(slot.startYear) - 2024) * 12 + (parseInt(slot.startMonth) - 1);
+        let eIdx = (parseInt(slot.endYear) - 2024) * 12 + (parseInt(slot.endMonth) - 1);
+        sIdx = Math.max(0, Math.min(35, sIdx));
+        eIdx = Math.max(0, Math.min(35, eIdx));
+        let fin = State.processedData.financials[slot.cat];
+        if (!fin) return 0;
+        let salesKey = Object.keys(fin).find(k => k.includes('매출액'));
+        if (salesKey && fin[salesKey]) {
+            let d = extractPeriodicData(fin[salesKey].data).slice(sIdx, eIdx + 1);
+            return d.reduce((a, b) => a + b, 0);
+        }
+        return 0;
+    });
+
+    accountsToCompare.forEach(accKey => {
+        let accObj = tcFin[accKey];
+        if (!accObj) return;
+        
+        let displayLabel = accObj.label;
+        if (displayLabel.includes('매출액')) displayLabel = '매출단가';
+
+        tbodyHtml += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+            <td style="text-align: left; padding: 16px; font-weight: 600; color: var(--accent-cyan); border-right: 1px solid rgba(255,255,255,0.05);">${displayLabel}</td>`;
+
+        allSlots.forEach((slot, idx) => {
+            if (idx > 0) tbodyHtml += `<td style="width: 16px; min-width: 16px; padding: 0; border: none; background: transparent;"></td>`;
+            let cellValue = '-';
+
+            if (slot.cat) {
+                let sIdx = (parseInt(slot.startYear) - 2024) * 12 + (parseInt(slot.startMonth) - 1);
+                let eIdx = (parseInt(slot.endYear) - 2024) * 12 + (parseInt(slot.endMonth) - 1);
+                sIdx = Math.max(0, Math.min(35, sIdx));
+                eIdx = Math.max(0, Math.min(35, eIdx));
+
+                let fin = State.processedData.financials[slot.cat];
+                
+                if (fin && fin[accKey]) {
+                    let d = extractPeriodicData(fin[accKey].data).slice(sIdx, eIdx + 1);
+                    let accSum = d.reduce((a, b) => a + b, 0);
+
+                    let volArr = [];
+                    if (State.processedData.volumes[slot.cat] && State.processedData.volumes[slot.cat].reduce((a,b)=>a+b, 0) > 0) {
+                        volArr = State.processedData.volumes[slot.cat].slice(sIdx, eIdx + 1);
+                    } else if (slot.cat === State.processedData.totalCompany) {
+                        volArr = new Array(eIdx - sIdx + 1).fill(0);
+                        Object.keys(State.processedData.volumes).forEach(k => {
+                            if (k !== State.processedData.totalCompany) {
+                                let vArr = State.processedData.volumes[k].slice(sIdx, eIdx + 1);
+                                for(let i=0; i<volArr.length; i++) volArr[i] += vArr[i] || 0;
+                            }
+                        });
+                    }
+                    let volSum = volArr.reduce((a, b) => a + b, 0);
+
+                    if (volSum > 0) {
+                        let unitCost = accSum / volSum;
+                        let colorStyle = '';
+                        let pctColorStyle = 'color: var(--text-secondary);';
+                        
+                        if (displayLabel.includes('영업이익')) {
+                            let isPositive = unitCost >= 0;
+                            colorStyle = isPositive ? 'color: #60a5fa;' : 'color: var(--accent-red);';
+                            pctColorStyle = colorStyle;
+                        }
+                        
+                        let pctStr = `<span style="flex: 1; text-align: right; padding-right: 32px;"></span>`;
+                        let salesSum = slotSalesSums[idx];
+                        if (salesSum && salesSum !== 0) {
+                            let pct = (accSum / salesSum) * 100;
+                            pctStr = `<span style="flex: 1; text-align: right; padding-right: 32px; font-size: 0.85rem; ${pctColorStyle}">${pct.toFixed(1)}%</span>`;
+                        }
+                        
+                        cellValue = `
+                            <div style="display: flex; justify-content: center; align-items: center; width: 100%;">
+                                <span style="flex: 1; text-align: right; padding-right: 12px; font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; ${colorStyle}">₩ ${formatUnit(unitCost)}</span>
+                                ${pctStr}
+                            </div>
+                        `;
+                    } else if (accSum !== 0) {
+                        cellValue = `<span style="color: var(--text-secondary); font-size: 0.85rem;">조업도 없음</span>`;
+                    } else {
+                        cellValue = `<span style="color: var(--text-secondary); font-family: 'JetBrains Mono', monospace;">₩ 0</span>`;
+                    }
+                }
+            }
+            tbodyHtml += `<td style="text-align: right; padding: 16px; background: rgba(255,255,255,0.01);">${cellValue}</td>`;
+        });
+        tbodyHtml += `</tr>`;
+    });
+
+    body.innerHTML = tbodyHtml;
+}
+
 document.addEventListener('DOMContentLoaded', init);
