@@ -178,16 +178,23 @@ body {
 
 /* Header */
 .top-header {
-  padding: 20px 24px;
+  padding: 36px 24px 40px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   position: sticky;
-  top: 16px;
+  top: 0;
   z-index: 100;
-  background: #111827 !important; /* Solid background to prevent overlapping text bleed-through */
-  height: 96px;
+  background: var(--bg-base) !important;
+  height: 120px;
   box-sizing: border-box;
+  margin-top: -16px;
+  margin-bottom: -20px;
+  margin-right: -16px;
+  border-radius: 0 !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.8) !important;
 }
 
 .header-titles h1 {
@@ -238,12 +245,16 @@ body {
 /* Filters Component */
 .filters-bar {
   display: flex;
-  padding: 16px 24px;
+  padding: 16px 40px 16px 24px;
   gap: 24px;
   position: sticky;
-  top: 132px; /* Docks perfectly under the header with 20px gap */
+  top: 120px; /* Docks perfectly under the new top-header */
   z-index: 99;
-  background: #111827 !important; /* Solid background to prevent overlapping text bleed-through */
+  background: var(--bg-base) !important;
+  margin-right: -16px;
+  border-radius: 0 !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
 }
 
 .filter-group {

@@ -170,6 +170,41 @@ function bindEvents() {
             switchTab('report');
         });
     }
+    
+    let btnDownloadPDF = document.getElementById('btnDownloadPDF');
+    if (btnDownloadPDF) {
+        btnDownloadPDF.addEventListener('click', () => {
+            const element = document.getElementById('reportView');
+            const originalText = btnDownloadPDF.innerHTML;
+            btnDownloadPDF.innerHTML = '<span style="margin-right: 6px;">⏳</span> PDF 생성중...';
+            
+            // PDF 렌더링 시 배경색과 글자색이 깨지지 않도록 강제 주입
+            const originalBg = element.style.backgroundColor;
+            const originalColor = element.style.color;
+            const originalPadding = element.style.padding;
+            
+            element.style.backgroundColor = '#0B0F19';
+            element.style.color = '#f8fafc';
+            element.style.padding = '10px';
+            
+            // 내부의 모든 텍스트 요소가 너무 밝은 회색으로 묻히지 않게 조치 (필요시)
+            const opt = {
+                margin:       10,
+                filename:     `Profitability_Report_${State.ui.selectedCategory || 'Total'}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false, backgroundColor: '#0B0F19' },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+            
+            html2pdf().set(opt).from(element).save().then(() => {
+                // 원래 상태로 복구
+                element.style.backgroundColor = originalBg;
+                element.style.color = originalColor;
+                element.style.padding = originalPadding;
+                btnDownloadPDF.innerHTML = originalText;
+            });
+        });
+    }
 
     els.dropzone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropzone.classList.add('dragover'); });
     els.dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); els.dropzone.classList.remove('dragover'); });
@@ -425,18 +460,43 @@ function parseWorkbook(workbook) {
     
     const salesSheet = XLSX.utils.sheet_to_json(workbook.Sheets['매출&손익'], {header: 1, defval: 0});
     
+    // Find the exact column indices for January of 2024, 2025, and 2026 by scanning the headers
+    let janIndices = [];
+    for (let r = 0; r < Math.min(10, salesSheet.length); r++) {
+        let tempIndices = [];
+        for (let c = 0; c < salesSheet[r].length; c++) {
+            if (String(salesSheet[r][c]).replace(/\s+/g, '') === '1월') {
+                tempIndices.push(c);
+            }
+        }
+        if (tempIndices.length >= 3) {
+            janIndices = tempIndices;
+            break;
+        }
+    }
+    
+    // Fallback if not found (should not happen for valid formats)
+    let idx2024 = janIndices[0] !== undefined ? janIndices[0] : 5;
+    let idx2025 = janIndices[1] !== undefined ? janIndices[1] : 18;
+    let idx2026 = janIndices[2] !== undefined ? janIndices[2] : 31;
+    
     // Safely extract Volumes by searching arrays for Category names
     let readingVolumes = false;
     let readingVolumesHeaderStr = '';
+    let lastMajorSection = ''; // Track '실적' vs '계획'
+    
     for (let i = 0; i < salesSheet.length; i++) {
         let row = salesSheet[i];
         if (!row) continue;
         
-        // Find the Volume section header
         let rowStr = Object.values(row).join(' ').replace(/\s+/g, '');
+        if (rowStr.includes('실적') && !rowStr.includes('계획')) lastMajorSection = '실적';
+        else if (rowStr.includes('계획') && !rowStr.includes('실적')) lastMajorSection = '계획';
+        
+        // Find the Volume section header
         if (rowStr.includes('매출수량') || rowStr.includes('K/EA') || rowStr.includes('KEA')) {
             readingVolumes = true;
-            readingVolumesHeaderStr = rowStr;
+            readingVolumesHeaderStr = rowStr + '_' + lastMajorSection;
             continue;
         }
         
@@ -458,25 +518,58 @@ function parseWorkbook(workbook) {
                 let val = row[checkCol];
                 if (val !== undefined && val !== null && val !== '') {
                     let valClean = String(val).replace(/\s+/g, '').toLowerCase();
+                    let valCore = valClean.replace(/_kg|kg$/, '');
+                    let vNorm = valCore.replace(/[^a-z0-9가-힣]/g, '');
+
+                    let matchedCat = null;
+
+                    // 1. Exact match (ignoring spaces/case)
+                    matchedCat = pData.categories.find(c => c.replace(/\s+/g, '').toLowerCase() === valClean);
                     
-                    let matchedCat = pData.categories.find(c => {
-                        let cClean = c.replace(/\s+/g, '').toLowerCase();
-                        if (cClean === valClean) return true;
-                        
-                        let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
-                        let valCore = valClean.replace(/_kg|kg$/, '');
-                        
-                        let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
-                        let vNorm = valCore.replace(/[^a-z0-9가-힣]/g, '');
-                        
-                        if (cNorm && vNorm && cNorm === vNorm) return true;
-                        
-                        if (vNorm.length >= 3 && cNorm.length >= 3) {
-                            if (cNorm.includes(vNorm) || vNorm.includes(cNorm)) return true;
+                    // 2. Exact match after stripping special characters
+                    if (!matchedCat) {
+                        matchedCat = pData.categories.find(c => {
+                            let cClean = c.replace(/\s+/g, '').toLowerCase();
+                            let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
+                            let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
+                            return cNorm && vNorm && cNorm === vNorm;
+                        });
+                    }
+
+                    // 3. Substring match (Only if it's a significant substring)
+                    if (!matchedCat) {
+                        let potentialMatches = pData.categories.filter(c => {
+                            if (c === pData.totalCompany) return false; // Prevent total company from hijacking
+                            let cClean = c.replace(/\s+/g, '').toLowerCase();
+                            let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
+                            let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
+                            return vNorm.length >= 4 && cNorm.includes(vNorm);
+                        });
+                        if (potentialMatches.length > 0) {
+                            potentialMatches.sort((a,b) => b.length - a.length);
+                            matchedCat = potentialMatches[0];
                         }
-                        return false;
-                    });
+                    }
                     
+                    // 4. Substring match reverse (e.g. value "camdeco_kg" contains category "camdeco")
+                    if (!matchedCat) {
+                        let potentialMatches = pData.categories.filter(c => {
+                            if (c === pData.totalCompany) return false; // Prevent total company from hijacking
+                            let cClean = c.replace(/\s+/g, '').toLowerCase();
+                            let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
+                            let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
+                            return cNorm.length >= 4 && vNorm.includes(cNorm);
+                        });
+                        if (potentialMatches.length > 0) {
+                            potentialMatches.sort((a,b) => {
+                                let aNorm = a.replace(/\s+/g, '').toLowerCase().replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '').replace(/[^a-z0-9가-힣]/g, '');
+                                let bNorm = b.replace(/\s+/g, '').toLowerCase().replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '').replace(/[^a-z0-9가-힣]/g, '');
+                                return bNorm.length - aNorm.length;
+                            });
+                            matchedCat = potentialMatches[0];
+                        }
+                    }
+
                     if (matchedCat) {
                         targetIdx = checkCol;
                         catStr = matchedCat;
@@ -488,20 +581,28 @@ function parseWorkbook(workbook) {
             if (targetIdx !== -1) {
                 let multiplier = 1; // 사용자가 수량이 실제 EA 단위(예: 67599993)라고 명시하였으므로 1로 고정
                 
-                // 매출&손익 layout is dense, relative to the category name index!
                 let volArr = [];
                 const getNum = (v) => { let n = Number(String(v).replace(/,/g,'').trim()); return isNaN(n)?0:n; };
                 
-                // 2024: 12 months starting right next to the label (targetIdx + 1..12)
-                for(let c=1; c<=12; c++) volArr.push(getNum(row[targetIdx + c]) * multiplier);
+                // 매출&손익 시트 구조에서 동적으로 찾은 1월 인덱스(idx2024, idx2025, idx2026)를 사용하여 12개월치 수량 추출
+                for(let c=0; c<12; c++) volArr.push(getNum(row[idx2024 + c]) * multiplier);
+                for(let c=0; c<12; c++) volArr.push(getNum(row[idx2025 + c]) * multiplier);
+                for(let c=0; c<12; c++) volArr.push(getNum(row[idx2026 + c]) * multiplier);
                 
-                // 2025: Skips the 2024 '합계' column (targetIdx + 13). Starts at + 14..25
-                for(let c=14; c<=25; c++) volArr.push(getNum(row[targetIdx + c]) * multiplier);
+                let isActual = readingVolumesHeaderStr.includes('실적');
+                let isPlan = readingVolumesHeaderStr.includes('계획');
+                let isFirst = !pData.volumes[catStr];
                 
-                // 2026: Skips the 2025 '합계' column (targetIdx + 26). Starts at + 27..38
-                for(let c=27; c<=38; c++) volArr.push(getNum(row[targetIdx + c]) * multiplier);
-                
-                pData.volumes[catStr] = volArr; 
+                // 실적(Actual)을 항상 우선시하여 덮어쓰기
+                if (isFirst || isActual || (!isPlan && pData._volumeIsPlan && pData._volumeIsPlan[catStr])) {
+                    pData.volumes[catStr] = volArr;
+                    if (!pData._volumeIsPlan) pData._volumeIsPlan = {};
+                    pData._volumeIsPlan[catStr] = isPlan;
+                    
+                    let secName = lastMajorSection ? lastMajorSection : '기본';
+                    let janVol = volArr[0] !== undefined ? volArr[0].toLocaleString() : '0';
+                    logMsg(`[매출수량] ${catStr} 추출 완료 (섹션: ${secName}, 24년 1월값: ${janVol})`, 'log-success');
+                }
             }
         }
     }
@@ -524,6 +625,23 @@ function parseWorkbook(workbook) {
             let accountRaw = row[0];
             if (typeof accountRaw === 'string' && accountRaw.trim() !== '') {
                 let accName = accountRaw.replace(/\s+/g, ''); 
+                
+                // 매출수량이 카테고리 시트에 있는 경우(정확한 EA 단위) 우선 추출
+                if (accName.includes('매출수량')) {
+                    let volArr = [];
+                    const getNum = (v) => { let n = Number(String(v).replace(/,/g,'').trim()); return isNaN(n)?0:n; };
+                    // 2024: base 1
+                    for(let i=0; i<12; i++) volArr.push(getNum(row[1 + i]));
+                    // 2025: base 16
+                    for(let i=0; i<12; i++) volArr.push(getNum(row[16 + i]));
+                    // 2026: base 31 (AF)
+                    for(let i=0; i<12; i++) volArr.push(getNum(row[31 + i]));
+                    
+                    pData.volumes[trimmedName] = volArr;
+                    let janVol = volArr[0] !== undefined ? volArr[0].toLocaleString() : '0';
+                    logMsg(`[매출수량] ${trimmedName} 개별 시트에서 EA단위 정밀 추출 완료 (24년 1월: ${janVol})`, 'log-info');
+                    continue;
+                }
                 
                 // Track hierarchy context
                 if (majorCategories.includes(accName)) {
@@ -628,7 +746,8 @@ function getCustomChartColors(seriesArray) {
 }
 
 function formatCategoryLabel(rawCat, forChart = false) {
-    let displayCat = rawCat === 'Mobile(SC)' ? 'Mobile(S/C)' : rawCat;
+    let displayCat = rawCat.replace(/\(SC\)/g, '(S/C)');
+    if (displayCat === 'SC') displayCat = 'S/C';
     displayCat = displayCat.replace(/\(\)$/, ''); // Remove empty trailing parenthesis
     if (forChart) {
         let shortLabelMatch = displayCat.match(/\((.*?)\)/);
@@ -1255,6 +1374,14 @@ function updateUnitAnalysis() {
                 }
                 let cellColor = isAvg ? 'color: var(--accent-cyan); font-weight: 500;' : '';
                 let ratioColor = isAvg ? 'color: rgba(6, 182, 212, 0.8);' : 'color: var(--text-secondary);';
+                
+                if (series.name.includes('영업이익') && val !== 0) {
+                    let isPositive = val > 0;
+                    cellColor = isPositive ? 'color: #60a5fa;' : 'color: var(--accent-red);';
+                    if (isAvg) cellColor += ' font-weight: bold;';
+                    ratioColor = isPositive ? 'color: rgba(96, 165, 250, 0.8);' : 'color: rgba(239, 68, 68, 0.8);';
+                }
+
                 bodyHtml += `<td style="text-align: right; padding-right: 4px; min-width: 40px; font-size: 0.85rem; ${cellColor}">${formatUnit(val)}</td>`;
                 bodyHtml += `<td style="text-align: right; padding-right: 4px; min-width: 35px; font-size: 0.8rem; ${ratioColor}">${ratioStr}</td>`;
             });
@@ -1407,73 +1534,18 @@ function updateAnalysisReport() {
         return;
     }
 
-    let { issues, dangerCount, warningCount, infoCount } = runIssueDetection();
-
-    // Update Counters
-    els.dangerCount.innerText = dangerCount;
-    els.warningCount.innerText = warningCount;
-    els.infoCount.innerText = infoCount;
-
-    // Render Issue Cards
-    if (issues.length === 0) {
-        els.detectedIssuesGrid.innerHTML = `
-            <div class="no-data-placeholder glass-panel" style="grid-column: 1 / -1; padding: 40px; text-align: center; border-color: rgba(16, 185, 129, 0.3);">
-                <span style="font-size: 2.5rem; display: block; margin-bottom: 16px;">✅</span>
-                <h3>감지된 중대한 리스크가 없습니다.</h3>
-                <p style="color: var(--text-secondary); margin-top: 8px;">현재 설정된 필터 조건에서 모든 부문이 양호한 재무 상태를 유지하고 있습니다.</p>
-            </div>
-        `;
-    } else {
-        let html = '';
-        issues.forEach(issue => {
-            html += `
-                <div class="issue-card glass-panel" style="border-left: 4px solid var(--accent-${issue.level === 'danger' ? 'red' : (issue.level === 'warning' ? 'magenta' : 'cyan')});">
-                    <div class="issue-card-header">
-                        <span class="issue-title" style="font-weight:600; font-size:1.05rem;">${issue.title}</span>
-                        <span class="issue-badge ${issue.level}">${issue.badge}</span>
-                    </div>
-                    <p class="issue-desc" style="margin-top: 8px; color: var(--text-secondary); line-height: 1.5; font-size:0.9rem;">${issue.desc}</p>
-                    <div class="issue-action-box" style="margin-top:12px;">
-                        <strong style="color: var(--text-primary);">🛠️ ${issue.action.title}</strong>
-                        <p style="margin-top:4px; color: var(--text-secondary); font-size:0.85rem; line-height: 1.4;">${issue.action.p}</p>
-                    </div>
-                </div>
-            `;
-        });
-        els.detectedIssuesGrid.innerHTML = html;
-    }
-
-    // Trigger Simulator with current slider value
-    let currentSliderVal = els.simRateSlider ? parseInt(els.simRateSlider.value) : 0;
-    runExchangeSimulation(currentSliderVal);
-
-    // Resize simulator chart since it might have been hidden
-    setTimeout(() => {
-        if (State.charts.simTrend) {
-            window.dispatchEvent(new Event('resize'));
-        }
-    }, 100);
-}
-
-function runIssueDetection() {
-    let issues = [];
-    let dangerCount = 0;
-    let warningCount = 0;
-    let infoCount = 0;
-
-    let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
-    let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
-    sIdx = Math.max(0, Math.min(35, sIdx));
-    eIdx = Math.max(0, Math.min(35, eIdx));
-    let periodLength = eIdx - sIdx + 1;
-
     let tc = State.processedData.totalCompany;
     let selCat = State.ui.selectedCategory || tc;
-    
+
     // --- 환율 변동성 민감도 고정 섹션 (항상 하단 표시) ---
     let exchangeRateSection = document.getElementById('exchangeRateSection');
     let exchangeRateSensitivityCard = document.getElementById('exchangeRateSensitivityCard');
     
+    let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
+    let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
+    sIdx = Math.max(0, Math.min(35, sIdx));
+    eIdx = Math.max(0, Math.min(35, eIdx));
+
     if (State.processedData.financials[tc]) {
         let fin = State.processedData.financials[tc];
         let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
@@ -1504,9 +1576,121 @@ function runIssueDetection() {
         exchangeRateSection.style.display = 'none';
     }
 
-    // --- 11대 핵심 지표 분석 엔진 (Option B: 문제 발생 시 카드 표시) ---
-    if (selCat && State.processedData.financials[selCat]) {
-        let fin = State.processedData.financials[selCat];
+    let allIssues = [];
+    let dCount = 0, wCount = 0, iCount = 0;
+    
+    let categoriesToAnalyze = [tc, ...State.processedData.categories.filter(c => c !== tc)];
+    
+    categoriesToAnalyze.forEach(cat => {
+        let res = runIssueDetection(cat);
+        allIssues = allIssues.concat(res.issues);
+        dCount += res.dangerCount;
+        wCount += res.warningCount;
+        iCount += res.infoCount;
+    });
+
+    // Update Counters
+    els.dangerCount.innerText = dCount;
+    els.warningCount.innerText = wCount;
+    els.infoCount.innerText = iCount;
+
+    // Render Issue Cards Grouped
+    if (allIssues.length === 0) {
+        els.detectedIssuesGrid.innerHTML = `
+            <div class="no-data-placeholder glass-panel" style="grid-column: 1 / -1; padding: 40px; text-align: center; border-color: rgba(16, 185, 129, 0.3);">
+                <span style="font-size: 2.5rem; display: block; margin-bottom: 16px;">✅</span>
+                <h3>감지된 중대한 리스크가 없습니다.</h3>
+                <p style="color: var(--text-secondary); margin-top: 8px;">현재 설정된 필터 조건에서 모든 부문이 양호한 재무 상태를 유지하고 있습니다.</p>
+            </div>
+        `;
+    } else {
+        let groups = {
+            '매출액 (Sales & Volume)': [],
+            '영업손익 및 수익성 (Profitability & BEP)': [],
+            '재료비 (Material Cost)': [],
+            '노무비 (Labor Cost)': [],
+            '변동제조비 (Variable Mfg Expenses)': [],
+            '고정제조비 및 판관비 (Fixed Mfg & SG&A Expenses)': [],
+            '재고자산 (Inventory)': []
+        };
+        
+        allIssues.forEach(issue => {
+            if (!groups[issue.group]) groups[issue.group] = [];
+            groups[issue.group].push(issue);
+        });
+        
+        let html = '';
+        Object.keys(groups).forEach(gName => {
+            let gIssues = groups[gName];
+            if (gIssues.length > 0) {
+                // Sort: selCat first
+                gIssues.sort((a, b) => {
+                    if (a.targetCat === selCat && b.targetCat !== selCat) return -1;
+                    if (a.targetCat !== selCat && b.targetCat === selCat) return 1;
+                    return 0; // maintain original order for others
+                });
+                
+                html += `
+                    <div class="account-group-section" style="grid-column: 1 / -1; margin-top: 16px;">
+                        <h3 class="account-group-header" style="margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border-color); color: var(--text-primary); font-size: 1.25rem;">
+                            <span style="margin-right:8px; color: var(--accent-cyan);">■</span>${gName}
+                        </h3>
+                        <div class="issue-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+                `;
+                
+                gIssues.forEach(issue => {
+                    html += `
+                        <div class="issue-card glass-panel" style="border-left: 4px solid var(--accent-${issue.level === 'danger' ? 'red' : (issue.level === 'warning' ? 'magenta' : 'cyan')});">
+                            <div class="issue-card-header">
+                                <span class="issue-title" style="font-weight:600; font-size:1.05rem;">${issue.title}</span>
+                                <span class="issue-badge ${issue.level}">${issue.badge}</span>
+                            </div>
+                            <p class="issue-desc" style="margin-top: 8px; color: var(--text-secondary); line-height: 1.5; font-size:0.9rem;">${issue.desc}</p>
+                            <div class="issue-action-box" style="margin-top:12px;">
+                                <strong style="color: var(--text-primary);">🛠️ ${issue.action.title}</strong>
+                                <p style="margin-top:4px; color: var(--text-secondary); font-size:0.85rem; line-height: 1.4;">${issue.action.p}</p>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `</div></div>`;
+            }
+        });
+        
+        els.detectedIssuesGrid.innerHTML = html;
+    }
+
+    // Trigger Simulator with current slider value
+    let currentSliderVal = els.simRateSlider ? parseInt(els.simRateSlider.value) : 0;
+    runExchangeSimulation(currentSliderVal);
+
+    // Resize simulator chart since it might have been hidden
+    setTimeout(() => {
+        if (State.charts.simTrend) {
+            window.dispatchEvent(new Event('resize'));
+        }
+    }, 100);
+}
+
+function runIssueDetection(targetCat) {
+    let issues = [];
+    let dangerCount = 0;
+    let warningCount = 0;
+    let infoCount = 0;
+
+    let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
+    let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
+    sIdx = Math.max(0, Math.min(35, sIdx));
+    eIdx = Math.max(0, Math.min(35, eIdx));
+    let periodLength = eIdx - sIdx + 1;
+
+    let displayCat = formatCategoryLabel(targetCat);
+    let tc = State.processedData.totalCompany;
+    
+    // --- 11대 핵심 지표 분석 엔진 ---
+    if (targetCat && State.processedData.financials[targetCat]) {
+        let fin = State.processedData.financials[targetCat];
         
         let m = {
             sales: 0, valLoss: 0, grossProfit: 0, varMfg: 0, fixedMfg: 0, 
@@ -1515,14 +1699,25 @@ function runIssueDetection() {
             salesData: [], opProfitData: []
         };
 
+        let fullTrend = {
+            sales: new Array(36).fill(0),
+            material: new Array(36).fill(0),
+            labor: new Array(36).fill(0),
+            others: new Array(36).fill(0)
+        };
+
         // 데이터 집계 (Aggregation)
         Object.keys(fin).forEach(accKey => {
             let accObj = fin[accKey];
             let lbl = accObj.label.replace(/\s+/g, '');
-            let d = extractPeriodicData(accObj.data).slice(sIdx, eIdx + 1);
+            let rawData = extractPeriodicData(accObj.data);
+            let d = rawData.slice(sIdx, eIdx + 1);
             let total = d.reduce((a, b) => a + b, 0);
 
-            if (lbl === '매출액') { m.sales += total; m.salesData = d; }
+            if (lbl === '매출액') { 
+                m.sales += total; m.salesData = d; 
+                rawData.forEach((v,i)=> fullTrend.sales[i]+=v);
+            }
             else if (lbl === '제품평가손실') m.valLoss += total;
             else if (lbl === '매출이익') m.grossProfit += total;
             else if (lbl === '영업이익') { m.opProfit += total; m.opProfitData = d; }
@@ -1532,68 +1727,142 @@ function runIssueDetection() {
             else if (accKey.startsWith('고정제조비') && accObj.level === 1) m.fixedMfg += total;
             else if ((lbl.includes('판매비') || lbl.includes('일반관리비')) && accObj.level === 1) m.sga += total;
 
-            // 5. 재료비 (원재료비, 부재료비, 직접포장비 등)
             if (lbl.includes('원재료비') || lbl.includes('부재료비') || lbl.includes('직접포장비')) {
                 if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
                     m.material += total;
+                    rawData.forEach((v,i)=> fullTrend.material[i]+=v);
                 }
             }
 
-            // 6. 통합 노무비 (노무비, 복리비, 복리후생비, 급여, 인건비)
             if (lbl.includes('노무비') || lbl.includes('복리') || lbl.includes('급여') || lbl.includes('인건비')) {
                 if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
                     m.labor += total;
+                    rawData.forEach((v,i)=> fullTrend.labor[i]+=v);
                 }
             }
 
-            // 7. 기타 주요 경비 (외주가공비, 전력비, 소모품비, 포장비, 외주요역비, 일반가공비, 소모공구비, Royalty)
             if (lbl.includes('외주가공비') || lbl.includes('전력비') || lbl.includes('소모품비') || lbl.includes('포장비') || lbl.includes('외주요역비') || lbl.includes('일반가공비') || lbl.includes('소모공구비') || lbl.includes('Royalty') || lbl.includes('로열티')) {
                 if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
                     m.others += total;
+                    rawData.forEach((v,i)=> fullTrend.others[i]+=v);
                 }
             }
 
-            // 9. 감가상각, 수선, 간접인건비
-            if (lbl.includes('감가상각비') || lbl.includes('수선비') || lbl.includes('간접인건비')) {
+            if (lbl.includes('감가상각비') || lbl.includes('수선비')) {
                 if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
                     m.deprecMaintInd += total;
                 }
             }
         });
 
-        // --- 알고리즘 기반 리스크 감지(Issue Detection) ---
-        
-        // 1. BEP Overrun (10. 손익분기점 미달)
+        function getTrendContextHtml(numArr, denArr, lastIdx) {
+            if (lastIdx < 0) return '';
+            let lastNum = numArr[lastIdx] || 0;
+            let lastDen = denArr[lastIdx] || 0;
+            if (lastDen === 0) return '';
+            let lastRatio = (lastNum / lastDen) * 100;
+            
+            let sum3MNum = 0, sum3MDen = 0;
+            let start3M = Math.max(0, lastIdx - 3);
+            for (let i = start3M; i < lastIdx; i++) { sum3MNum += numArr[i] || 0; sum3MDen += denArr[i] || 0; }
+            let avg3MRatio = sum3MDen > 0 ? (sum3MNum / sum3MDen) * 100 : null;
+            
+            let sum12MNum = 0, sum12MDen = 0;
+            let start12M = Math.max(0, lastIdx - 12);
+            for (let i = start12M; i < lastIdx; i++) { sum12MNum += numArr[i] || 0; sum12MDen += denArr[i] || 0; }
+            let avg12MRatio = sum12MDen > 0 ? (sum12MNum / sum12MDen) * 100 : null;
+            
+            if (avg3MRatio === null) return '';
+            let diff = lastRatio - avg3MRatio;
+            let diffStr = diff > 0 ? `<span style="color: #ef4444;">🔺 ${diff.toFixed(1)}%p 악화</span>` : `<span style="color: #10b981;">🔻 ${Math.abs(diff).toFixed(1)}%p 개선</span>`;
+            
+            return `
+                <div style="margin-top: 12px; padding: 12px; background: rgba(0,0,0,0.25); border-left: 3px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 0.85rem;">
+                    <strong style="color: var(--text-primary); display:block; margin-bottom:4px;">📊 최근 추세 분석 (마지막 실적월 기준)</strong>
+                    <span style="color: var(--text-secondary);">
+                    마지막 달: <strong style="color:var(--text-primary);">${lastRatio.toFixed(1)}%</strong> | 
+                    직전 3개월 평균: ${avg3MRatio.toFixed(1)}% (${diffStr})${avg12MRatio !== null ? ` | 직전 1년 평균: ${avg12MRatio.toFixed(1)}%` : ''}
+                    </span>
+                </div>
+            `;
+        }
+
+        function getUnitTrendContextHtml(numArr, denArr, lastIdx, isCost) {
+            if (lastIdx < 0) return '';
+            let lastNum = numArr[lastIdx] || 0;
+            let lastDen = denArr[lastIdx] || 0;
+            if (lastDen === 0) return '';
+            let lastUnit = lastNum / lastDen;
+            
+            let sum3MNum = 0, sum3MDen = 0;
+            let start3M = Math.max(0, lastIdx - 3);
+            for (let i = start3M; i < lastIdx; i++) { sum3MNum += numArr[i] || 0; sum3MDen += denArr[i] || 0; }
+            let avg3MUnit = sum3MDen > 0 ? (sum3MNum / sum3MDen) : null;
+            
+            let sum12MNum = 0, sum12MDen = 0;
+            let start12M = Math.max(0, lastIdx - 12);
+            for (let i = start12M; i < lastIdx; i++) { sum12MNum += numArr[i] || 0; sum12MDen += denArr[i] || 0; }
+            let avg12MUnit = sum12MDen > 0 ? (sum12MNum / sum12MDen) : null;
+            
+            if (avg3MUnit === null) return '';
+            let diff = lastUnit - avg3MUnit;
+            let diffPct = (diff / avg3MUnit) * 100;
+            
+            let diffStr = '';
+            if (isCost) {
+                diffStr = diff > 0 ? `<span style="color: #ef4444;">🔺 단가 ${diffPct.toFixed(1)}% 상승(악화)</span>` : `<span style="color: #10b981;">🔻 단가 ${Math.abs(diffPct).toFixed(1)}% 하락(개선)</span>`;
+            } else {
+                diffStr = diff < 0 ? `<span style="color: #ef4444;">🔻 단가 ${Math.abs(diffPct).toFixed(1)}% 하락(악화)</span>` : `<span style="color: #10b981;">🔺 단가 ${diffPct.toFixed(1)}% 상승(개선)</span>`;
+            }
+
+            return `
+                <div style="margin-top: 12px; padding: 12px; background: rgba(0,0,0,0.25); border-left: 3px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 0.85rem;">
+                    <strong style="color: var(--text-primary); display:block; margin-bottom:4px;">📊 최근 단가 추세 (마지막 실적월 기준)</strong>
+                    <span style="color: var(--text-secondary);">
+                    마지막 달: <strong style="color:var(--text-primary);">${formatCurr(lastUnit)}</strong> | 
+                    직전 3개월 평균: ${formatCurr(avg3MUnit)} (${diffStr})${avg12MUnit !== null ? ` | 직전 1년 평균: ${formatCurr(avg12MUnit)}` : ''}
+                    </span>
+                </div>
+            `;
+        }
+
+        // 1. BEP Overrun
         if (m.sales > 0 && m.bep > 0 && m.sales < m.bep) {
             dangerCount++;
             issues.push({
+                group: '영업손익 및 수익성 (Profitability & BEP)',
+                targetCat: targetCat,
                 level: 'danger',
                 badge: '위험',
-                title: `[${selCat}] 10. 손익분기점(BEP) 미달`,
+                title: `[${displayCat}] 손익분기점(BEP) 미달`,
                 desc: `조회 기간의 총 매출액(${formatCurr(m.sales)})이 손익분기점(${formatCurr(m.bep)})에 미달하여 구조적인 영업손실이 발생하고 있습니다.`,
                 action: { title: '추천 조치 계획', p: '• 1단계: 변동비 및 고정비 절감 한계치 재평가<br>• 2단계: 손익분기점을 초과할 수 있도록 최소 수주 물량(Q) 확보 및 단가(P) 인상 협상' }
             });
         }
 
-        // 2. Marginal Profit Loss (8. 한계적자 발생)
+        // 2. Marginal Profit Loss
         if (m.sales > 0 && m.marginalProfit < 0) {
             dangerCount++;
             issues.push({
+                group: '영업손익 및 수익성 (Profitability & BEP)',
+                targetCat: targetCat,
                 level: 'danger',
                 badge: '위험',
-                title: `[${selCat}] 8. 한계이익 적자 발생`,
+                title: `[${displayCat}] 한계이익 적자 발생`,
                 desc: `조회 기간 동안 변동비가 매출을 초과하여 한계이익 적자 ${formatCurr(m.marginalProfit)}를 기록 중입니다. 생산을 늘릴수록 손실이 누적됩니다.`,
                 action: { title: '추천 조치 계획', p: '• 1단계: 부자재 및 물류비 소요 단위 BOM 정밀 재검증 및 단가 긴급 재협상<br>• 2단계: 적자 제품의 수주량을 통제하고 고수익 품목으로 전환 생산' }
             });
         }
 
-        // 3. Gross Profit & Operating Profit Loss (3, 11. 매출이익/영업이익 적자)
+        // 3. Gross Profit & Operating Profit Loss
         if (m.sales > 0 && m.grossProfit < 0) {
             dangerCount++;
             issues.push({
+                group: '영업손익 및 수익성 (Profitability & BEP)',
+                targetCat: targetCat,
                 level: 'danger',
                 badge: '위험',
-                title: `[${selCat}] 3. 매출이익 적자 발생`,
+                title: `[${displayCat}] 매출이익 적자 발생`,
                 desc: `매출액 대비 제조원가가 초과하여 매출이익이 적자(${formatCurr(m.grossProfit)}) 상태입니다. 제품을 팔수록 원가 손실이 커집니다.`,
                 action: { title: '추천 조치 계획', p: '• 1단계: 직접 재료비 및 노무비 등 핵심 제조원가 낭비 요인 즉각 실사<br>• 2단계: 채산성 한계 제품 단종 및 수익성 위주 포트폴리오 재편' }
             });
@@ -1601,63 +1870,89 @@ function runIssueDetection() {
         if (m.sales > 0 && m.opProfit < 0 && m.grossProfit >= 0) {
             warningCount++;
             issues.push({
+                group: '영업손익 및 수익성 (Profitability & BEP)',
+                targetCat: targetCat,
                 level: 'warning',
                 badge: '주의',
-                title: `[${selCat}] 11. 영업이익 적자 발생`,
+                title: `[${displayCat}] 영업이익 적자 발생`,
                 desc: `매출이익은 흑자이나, 판관비 등 과다 지출로 인해 영업이익이 적자(${formatCurr(m.opProfit)})를 기록 중입니다.`,
                 action: { title: '추천 조치 계획', p: '• 1단계: 고정 판매비 및 일반관리비 등 간접 경비 제로베이스 예산 통제<br>• 2단계: 조직 슬림화 및 비효율 지원 인력 감축 검토' }
             });
         }
 
-        // 4. Product Valuation Loss Spike (2. 제품평가손실 비중 과다)
+        // 4. Product Valuation Loss Spike
         if (m.sales > 0 && m.valLoss > 0 && (m.valLoss / m.sales) > 0.05) {
             warningCount++;
             issues.push({
+                group: '재고자산 (Inventory)',
+                targetCat: targetCat,
                 level: 'warning',
                 badge: '주의',
-                title: `[${selCat}] 2. 제품평가손실 비중 과다`,
+                title: `[${displayCat}] 제품평가손실 비중 과다`,
                 desc: `제품평가손실(${formatCurr(m.valLoss)})이 매출의 ${((m.valLoss/m.sales)*100).toFixed(1)}%를 초과하여 재고 자산 건전성이 악화되고 있습니다.`,
                 action: { title: '추천 조치 계획', p: '• 1단계: 장기 체화 재고 및 불량품 현황 전수 조사<br>• 2단계: 재고 덤핑 매각 또는 폐기 처리를 통한 추가 손실 차단' }
             });
         }
 
-        // 5. Labor Cost Burden (6. 통합 노무비 부담 과다)
+        // 5. Labor Cost Burden
         if (m.sales > 0 && m.labor > 0 && (m.labor / m.sales) > 0.20) {
             infoCount++;
+            
+            let laborWarning = '';
+            let lastL = fullTrend.labor[eIdx] || 0;
+            let lastS = fullTrend.sales[eIdx] || 0;
+            if (lastS > 0) {
+                let lastRatio = lastL / lastS;
+                let sum3L = 0, sum3S = 0;
+                for(let i = Math.max(0, eIdx - 3); i < eIdx; i++){
+                    sum3L += fullTrend.labor[i] || 0;
+                    sum3S += fullTrend.sales[i] || 0;
+                }
+                if (sum3S > 0 && lastRatio > (sum3L / sum3S)) {
+                    laborWarning = `<br><br><span style="color:var(--accent-magenta);">⚠️ <strong>급상승 요인 점검:</strong> 최근 노무비 비중이 과거 대비 상승세에 있습니다. 최저임금/기본급 일괄 인상 반영 여부나 명절 상여금(Tet 등) 및 성과급 지급에 따른 일시적 상승인지 확인이 필요합니다.</span>`;
+                }
+            }
+
             issues.push({
+                group: '노무비 (Labor Cost)',
+                targetCat: targetCat,
                 level: 'info',
                 badge: '정보',
-                title: `[${selCat}] 6. 통합 노무비 부담 과다`,
-                desc: `변동/고정/판관비를 통틀어 투입된 총 노무비(복리후생 포함)가 ${formatCurr(m.labor)}으로 매출의 ${((m.labor/m.sales)*100).toFixed(1)}%에 달합니다.`,
+                title: `[${displayCat}] 통합 노무비 부담 과다`,
+                desc: `변동비/고정비/판관비를 통틀어 투입된 총 노무비(복리후생, 간접인건비 포함)가 ${formatCurr(m.labor)}으로 매출의 ${((m.labor/m.sales)*100).toFixed(1)}%에 달합니다.` + laborWarning + getTrendContextHtml(fullTrend.labor, fullTrend.sales, eIdx),
                 action: { title: '추천 조치 계획', p: '• 1단계: 공정 라인 자동화율 점검 및 잉여 인력 효율화<br>• 2단계: 잔업/특근 등 변동 인건비 통제 및 유연근무제 도입' }
             });
         }
 
-        // 6. Material Cost Burden (5. 재료비 비중 과다)
+        // 6. Material Cost Burden
         if (m.sales > 0 && m.material > 0 && (m.material / m.sales) > 0.40) {
             infoCount++;
             issues.push({
+                group: '재료비 (Material Cost)',
+                targetCat: targetCat,
                 level: 'info',
                 badge: '정보',
-                title: `[${selCat}] 5. 재료비 비중 과다`,
-                desc: `핵심 재료비(원재료, 부재료 등)가 ${formatCurr(m.material)}으로 매출의 ${((m.material/m.sales)*100).toFixed(1)}%를 차지하고 있습니다. 원자재가 상승 압력이 큽니다.`,
+                title: `[${displayCat}] 재료비 비중 과다`,
+                desc: `핵심 재료비(원재료, 부재료 등)가 ${formatCurr(m.material)}으로 매출의 ${((m.material/m.sales)*100).toFixed(1)}%를 차지하고 있습니다. 원자재가 상승 압력이 큽니다.` + getTrendContextHtml(fullTrend.material, fullTrend.sales, eIdx),
                 action: { title: '추천 조치 계획', p: '• 1단계: 원부자재 글로벌 소싱 다변화 및 대량 구매 단가 인하 협상<br>• 2단계: 제조 공정 수율(Yield) 개선 및 불량 폐기 감소 활동' }
             });
         }
         
-        // 7. Other Major Expenses (7. 8대 기타 주요 경비 집중 관리)
+        // 7. Other Major Expenses
         if (m.sales > 0 && m.others > 0 && (m.others / m.sales) > 0.15) {
             infoCount++;
             issues.push({
+                group: '고정제조비 및 판관비 (Fixed Mfg & SG&A Expenses)',
+                targetCat: targetCat,
                 level: 'info',
                 badge: '정보',
-                title: `[${selCat}] 7. 8대 기타 주요 경비 과다`,
-                desc: `외주가공, 전력비, 소모품 등 주요 경비 합산액이 ${formatCurr(m.others)}으로 매출의 ${((m.others/m.sales)*100).toFixed(1)}%를 차지합니다. 추가 절감 여력이 있는지 점검이 필요합니다.`,
+                title: `[${displayCat}] 8대 기타 주요 경비 과다`,
+                desc: `외주가공, 전력비, 소모품 등 주요 경비 합산액이 ${formatCurr(m.others)}으로 매출의 ${((m.others/m.sales)*100).toFixed(1)}%를 차지합니다. 추가 절감 여력이 있는지 점검이 필요합니다.` + getTrendContextHtml(fullTrend.others, fullTrend.sales, eIdx),
                 action: { title: '추천 조치 계획', p: '• 1단계: 외주가공 공정의 내재화 검토 및 전력 누수 타임 개선<br>• 2단계: 소모공구 수명 연장 활동 및 비품 구매 승인 절차 강화' }
             });
         }
 
-        // 8. Tet Holiday Impact (2월 조업도 손실) - 매출액 기준
+        // 8. Tet Holiday Impact
         let startY = parseInt(State.ui.startYear);
         let endY = parseInt(State.ui.endYear);
         for (let y = Math.max(2024, startY); y <= Math.min(2026, endY); y++) {
@@ -1676,12 +1971,132 @@ function runIssueDetection() {
                     let dropPct = ((1 - febSales / avgJanMar) * 100).toFixed(1);
                     warningCount++;
                     issues.push({
+                        group: '매출액 (Sales & Volume)',
+                        targetCat: targetCat,
                         level: 'warning',
                         badge: '주의',
-                        title: `[${selCat}] 1. ${y}년 2월 구정(Tet) 조업도 손실`,
+                        title: `[${displayCat}] ${y}년 2월 구정(Tet) 조업도 손실`,
                         desc: `${y}년 2월 매출액은 ${formatCurr(febSales)}로, 전후 월(1,3월) 평균 매출 ${formatCurr(avgJanMar)} 대비 ${dropPct}% 급감하였습니다. 가동 중단에 따른 비조업 손실이 주 원인입니다.`,
                         action: { title: '추천 조치 계획', p: '• 1단계: 구정 전후 집중 생산 추진 및 조기 재고 구축으로 출하 차질 최소화<br>• 2단계: 조기 복귀 인센티브 지원 등을 통해 가동률 복구' }
                     });
+                }
+            }
+        }
+
+        // --- Royalty Policy Change (2026+) ---
+        if (endY >= 2026 && targetCat !== tc) {
+            let catUpper = targetCat.toUpperCase();
+            if (catUpper.includes('MOBILE') || catUpper.includes('DECO') || catUpper.includes('OIS')) {
+                warningCount++;
+                issues.push({
+                    group: '변동제조비 (Variable Mfg Expenses)',
+                    targetCat: targetCat,
+                    level: 'warning',
+                    badge: '주의',
+                    title: `[${displayCat}] 본사 Royalty 정책 변경 (6% 일괄 적용)`,
+                    desc: `2026년 1월부로 베트남법인의 본사(한국) 지급 로열티 산정 기준이 매출액의 6%로 일괄 통합 및 인상되어, 기존(Press 3%, Image 5% 등 품목별 차등) 대비 변동제조비 부담이 크게 증가하였습니다.`,
+                    action: { title: '추천 조치 계획', p: '• 1단계: 로열티율 인상분을 상쇄할 수 있는 핵심 원가(수율, 불량률 등) 절감 방안 강력 추진<br>• 2단계: 본사와의 이전가격(TP) 정책 재검토 시 로열티율 조정 한계치 협의' }
+                });
+            }
+        }
+
+        // --- 단가 특화 리스크 감지 ---
+        let volData = State.processedData.volumes[targetCat];
+        if (!volData && targetCat === tc) {
+            volData = new Array(36).fill(0);
+            Object.keys(State.processedData.volumes).forEach(k => {
+                if (k !== tc) {
+                    let vArr = State.processedData.volumes[k];
+                    for(let i=0; i<36; i++) volData[i] += vArr[i] || 0;
+                }
+            });
+        }
+        
+        if (volData && periodLength >= 2 && m.salesData.length > 0) {
+            let effStart = 0;
+            let effEnd = periodLength - 1;
+            
+            while(effStart <= effEnd && (volData[sIdx + effStart] === 0 || m.salesData[effStart] === 0)) {
+                effStart++;
+            }
+            while(effEnd >= effStart && (volData[sIdx + effEnd] === 0 || m.salesData[effEnd] === 0)) {
+                effEnd--;
+            }
+
+            if (effStart < effEnd) {
+                let startVol = volData[sIdx + effStart];
+                let endVol = volData[sIdx + effEnd];
+                let startSales = m.salesData[effStart];
+                let endSales = m.salesData[effEnd];
+                
+                let startUP = startSales / startVol;
+                let endUP = endSales / endVol;
+                
+                if (endUP < startUP * 0.95) {
+                    let dropRate = ((startUP - endUP) / startUP * 100).toFixed(1);
+                    dangerCount++;
+                    issues.push({
+                        group: '매출액 (Sales & Volume)',
+                        targetCat: targetCat,
+                        level: 'danger',
+                        badge: '위험',
+                        title: `[${displayCat}] 단가 특화: 단위당 판가(P) 급락`,
+                        desc: `선택 기간 내 유효 시작월 대비 마지막 데이터 월의 단위당 판매가격이 ${dropRate}% 하락하였습니다. (시작월: ${formatCurr(startUP)} -> 마지막월: ${formatCurr(endUP)})` + getUnitTrendContextHtml(fullTrend.sales, volData, sIdx + effEnd, false),
+                        action: { title: '추천 조치 계획', p: '• 1단계: 글로벌 판가 인하 압력 및 고객사 단가 인하(CR) 요인 분석<br>• 2단계: 신규 고부가가치 제품 수주 확대 및 기존 제품 판가 인상 방안 마련' }
+                    });
+                }
+                
+                let materialData = new Array(periodLength).fill(0);
+                let varMfgData = new Array(periodLength).fill(0);
+                Object.keys(fin).forEach(accKey => {
+                    let accObj = fin[accKey];
+                    let lbl = accObj.label.replace(/\s+/g, '');
+                    let d = extractPeriodicData(accObj.data).slice(sIdx, eIdx + 1);
+                    
+                    if (lbl.includes('원재료비') || lbl.includes('부재료비') || lbl.includes('직접포장비')) {
+                        if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
+                            d.forEach((v, i) => materialData[i] += v);
+                        }
+                    }
+                    if (accKey.startsWith('변동제조비') && accObj.level === 1) {
+                        varMfgData = d;
+                    }
+                });
+                
+                if (materialData[effStart] > 0) {
+                    let startUMC = materialData[effStart] / startVol;
+                    let endUMC = materialData[effEnd] / endVol;
+                    
+                    if (endUMC > startUMC * 1.05) {
+                        let riseRate = ((endUMC - startUMC) / startUMC * 100).toFixed(1);
+                        warningCount++;
+                        issues.push({
+                            group: '재료비 (Material Cost)',
+                            targetCat: targetCat,
+                            level: 'warning',
+                            badge: '주의',
+                            title: `[${displayCat}] 단가 특화: 단위당 재료비 급등`,
+                            desc: `선택 기간 내 유효 시작월 대비 마지막 데이터 월의 단위당 재료비가 ${riseRate}% 상승하였습니다. (시작월: ${formatCurr(startUMC)} -> 마지막월: ${formatCurr(endUMC)})` + getUnitTrendContextHtml(fullTrend.material, volData, sIdx + effEnd, true),
+                            action: { title: '추천 조치 계획', p: '• 1단계: 원부자재 매입 단가 변동 내역 및 환율 영향도 집중 분석<br>• 2단계: 대체 소재 발굴 및 저가 구매처 확보 (Global Sourcing)' }
+                        });
+                    }
+                }
+                
+                if (varMfgData[effEnd] > 0) {
+                    let endUVC = varMfgData[effEnd] / endVol;
+                    
+                    if (endUP < endUVC) {
+                        dangerCount++;
+                        issues.push({
+                            group: '영업손익 및 수익성 (Profitability & BEP)',
+                            targetCat: targetCat,
+                            level: 'danger',
+                            badge: '위험',
+                            title: `[${displayCat}] 단가 특화: 단위당 한계적자 (역마진)`,
+                            desc: `선택 기간 내 마지막 데이터 월 기준 단위당 판매가(${formatCurr(endUP)})가 단위당 변동비(${formatCurr(endUVC)})보다 낮아 생산할수록 손실이 커지는 역마진 상태입니다.`,
+                            action: { title: '추천 조치 계획', p: '• 1단계: 해당 제품의 수익성(BOM 원가) 즉시 전면 재검토<br>• 2단계: 손실 품목 수주 중단 또는 판가 인상 강력 추진' }
+                        });
+                    }
                 }
             }
         }
@@ -1691,15 +2106,16 @@ function runIssueDetection() {
 }
 
 function runExchangeSimulation(percentChange) {
-    let tc = State.processedData.totalCompany;
-    if (!tc || !State.processedData.financials[tc]) return;
+    let cat = State.ui.selectedCategory;
+    if (cat === 'All') cat = State.processedData.totalCompany;
+    if (!cat || !State.processedData.financials[cat]) return;
 
     let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
     let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
     sIdx = Math.max(0, Math.min(35, sIdx));
     eIdx = Math.max(0, Math.min(35, eIdx));
 
-    let fin = State.processedData.financials[tc];
+    let fin = State.processedData.financials[cat];
     let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
     let opProfit = extractPeriodicData(fin['영업이익']?.data).slice(sIdx, eIdx + 1);
 
@@ -1717,7 +2133,7 @@ function runExchangeSimulation(percentChange) {
         rateValText += ' (기본환율)';
         els.simRateVal.style.color = 'var(--text-secondary)';
     } else {
-        rateValText += percentChange > 0 ? ' (USD 환율 상승 / 원화 약세 / 원화 환산 증가)' : ' (USD 환율 하락 / 원화 강세 / 원화 환산 감소)';
+        rateValText += percentChange > 0 ? ' (환율 상승 / 원화 약세 / 미화 강세)' : ' (환율 하락 / 원화 강세 / 미화 약세)';
         els.simRateVal.style.color = percentChange > 0 ? 'var(--accent-green)' : 'var(--accent-red)';
     }
     els.simRateVal.innerText = rateValText;
