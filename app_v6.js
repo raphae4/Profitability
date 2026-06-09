@@ -777,6 +777,8 @@ function processCategories() {
     });
     els.categoryFilter.innerHTML = html;
     els.uaCategoryFilter.innerHTML = uaHtml;
+    let syncCat = document.getElementById('syncCategory');
+    if (syncCat) syncCat.innerHTML = '<option value="">-- 품목분류 선택 --</option>' + uaHtml;
     
     let defaultCat = State.processedData.categories.includes(tc) ? tc : State.processedData.categories[0];
     if (defaultCat) {
@@ -1402,12 +1404,12 @@ function updateUnitAnalysis() {
 function initCharts() {
     const opts = { 
         chart: { foreColor: '#94a3b8', toolbar: { show: false }, zoom: { enabled: false }, parentHeightOffset: 0 }, 
-        theme: { mode: 'dark' }, 
+        theme: { mode: 'light' }, 
         grid: { show: true, borderColor: 'rgba(255, 255, 255, 0.5)', strokeDashArray: 2, yaxis: { lines: { show: true } }, padding: { top: 15, bottom: 0, left: 30, right: 30 } }, 
         legend: { show: true, position: 'bottom', height: 40 } 
     };
     
-    let ttTrend = { theme: 'dark', y: { formatter: function(val, { dataPointIndex }) {
+    let ttTrend = { theme: 'light', y: { formatter: function(val, { dataPointIndex }) {
         let rev = State.currentDashboardRev[dataPointIndex];
         let ratio = (rev && rev > 0) ? ((val / rev) * 100).toFixed(1) + '%' : '0%';
         if (val === rev) return `금액: ₩ ${Math.round(val).toLocaleString()}`;
@@ -1437,7 +1439,7 @@ function initCharts() {
     });
     State.charts.trend.render();
 
-    let ttCat = { theme: 'dark', y: { formatter: function(val, { dataPointIndex, seriesIndex, w }) {
+    let ttCat = { theme: 'light', y: { formatter: function(val, { dataPointIndex, seriesIndex, w }) {
         let rev = State.currentCatRev ? State.currentCatRev[dataPointIndex] : 0;
         let ratio = (rev && rev > 0) ? ((val / rev) * 100).toFixed(1) + '%' : '0.0%';
         let sName = w.globals.seriesNames[seriesIndex] || '';
@@ -1451,7 +1453,7 @@ function initCharts() {
     });
     State.charts.cat.render();
 
-    let ttUnit = { theme: 'dark', y: { formatter: function(val, { dataPointIndex, seriesIndex, w }) {
+    let ttUnit = { theme: 'light', y: { formatter: function(val, { dataPointIndex, seriesIndex, w }) {
         let rev = State.currentUnitRev[dataPointIndex];
         let ratio = (rev && rev > 0) ? ((val / rev) * 100).toFixed(1) + '%' : '0.0%';
         let sName = w.globals.seriesNames[seriesIndex];
@@ -1491,13 +1493,13 @@ function initCharts() {
     State.charts.unitTrend.render();
 
     State.charts.rate = new ApexCharts(document.querySelector("#rateChart"), {
-        ...opts, tooltip: { theme: 'dark' }, series: [{ name: '환율 (원/동*100)', data: [] }], chart: { ...opts.chart, type: 'area', height: 250 }, colors: ['#f59e0b'], fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } }, markers: { size: 3, hover: { size: 5 } }, dataLabels: { enabled: false }, stroke: { curve: 'smooth', width: 2 }, xaxis: { type: 'category', tickPlacement: 'on', categories: [], tickAmount: 12, labels: { style: { colors: '#94a3b8' } } }, yaxis: { min: 5.00, max: 6.00, title: { text: '환율 (KRW/VND*100)' }, labels: { formatter: (val) => val.toFixed(2) } }
+        ...opts, tooltip: { theme: 'light' }, series: [{ name: '환율 (원/동*100)', data: [] }], chart: { ...opts.chart, type: 'area', height: 250 }, colors: ['#f59e0b'], fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } }, markers: { size: 3, hover: { size: 5 } }, dataLabels: { enabled: false }, stroke: { curve: 'smooth', width: 2 }, xaxis: { type: 'category', tickPlacement: 'on', categories: [], tickAmount: 12, labels: { style: { colors: '#94a3b8' } } }, yaxis: { min: 5.00, max: 6.00, title: { text: '환율 (KRW/VND*100)' }, labels: { formatter: (val) => val.toFixed(2) } }
     });
     State.charts.rate.render();
 
     State.charts.simTrend = new ApexCharts(document.querySelector("#simChart"), {
         ...opts,
-        tooltip: { theme: 'dark', y: { formatter: (val) => '₩ ' + Math.round(val).toLocaleString('ko-KR') } },
+        tooltip: { theme: 'light', y: { formatter: (val) => '₩ ' + Math.round(val).toLocaleString('ko-KR') } },
         series: [{ name: '영업이익 (원)', data: [] }],
         chart: { ...opts.chart, type: 'bar', height: 200 },
         colors: ['#06b6d4'],
@@ -2247,6 +2249,53 @@ function initComparativeAnalysis() {
             
             // Only try to render slots and accounts if data is loaded
             if (State.processedData && State.processedData.categories && State.processedData.categories.length > 0) {
+                if (!State.ui.compInitialized) {
+                    State.ui.compInitialized = true;
+                    
+                    // Auto-detect the most recent month with actual data for comparative analysis only
+                    let ey = State.ui.endYear || '2026';
+                    let em = State.ui.endMonth || '04';
+                    
+                    let tcFin = State.processedData.financials[State.processedData.totalCompany];
+                    if (tcFin) {
+                        let salesAcc = Object.values(tcFin).find(a => a.key && a.key.includes('매출액'));
+                        if (salesAcc && salesAcc.data) {
+                            let extractedData = extractPeriodicData(salesAcc.data);
+                            let latestIdx = 35; // Default to 2026-12
+                            for (let i = 35; i >= 0; i--) {
+                                if (Math.abs(extractedData[i]) > 1) { // checking > 1 to avoid rounding noise
+                                    latestIdx = i;
+                                    break;
+                                }
+                            }
+                            ey = String(2024 + Math.floor(latestIdx / 12));
+                            em = String((latestIdx % 12) + 1).padStart(2, '0');
+                        }
+                    }
+                    
+                    let defaultCat = State.ui.selectedCategory || (State.processedData.categories.includes(State.processedData.totalCompany) ? State.processedData.totalCompany : State.processedData.categories[0]);
+                    
+                    for(let i=0; i<5; i++) {
+                        State.ui.comparativeSelections[i].startYear = ey;
+                        State.ui.comparativeSelections[i].startMonth = em;
+                        State.ui.comparativeSelections[i].endYear = ey;
+                        State.ui.comparativeSelections[i].endMonth = em;
+                        State.ui.comparativeSelections[i].cat = defaultCat;
+                    }
+                    
+                    let syncSY = document.getElementById('syncStartYear');
+                    let syncSM = document.getElementById('syncStartMonth');
+                    let syncEY = document.getElementById('syncEndYear');
+                    let syncEM = document.getElementById('syncEndMonth');
+                    let syncCat = document.getElementById('syncCategory');
+                    
+                    if (syncSY) syncSY.value = ey;
+                    if (syncSM) syncSM.value = em;
+                    if (syncEY) syncEY.value = ey;
+                    if (syncEM) syncEM.value = em;
+                    if (syncCat) syncCat.value = defaultCat;
+                }
+
                 renderCompSlots();
                 
                 // Default select Sales and OpProfit if not selected
@@ -2305,7 +2354,7 @@ function renderCompSlots() {
         }
     });
     
-    let html = `<tr><th style="min-width: 180px; text-align: center; padding: 16px; font-size: 1.15rem; font-weight: 700; color: #fff; vertical-align: middle;">비교 항목 (단가 기준)</th>`;
+    let html = `<tr><th style="min-width: 180px; text-align: center; padding: 16px; font-size: 1.15rem; font-weight: 700; color: var(--text-primary); vertical-align: middle;">비교 항목 (단가 기준)</th>`;
     for(let i=0; i<5; i++) {
         let mOptions = '';
         for(let m=1; m<=12; m++) {
@@ -2328,7 +2377,7 @@ function renderCompSlots() {
                             </select>
                             <select class="modern-select comp-sm" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">${mOptions}</select>
                         </div>
-                        <div style="text-align: center; color: rgba(255,255,255,0.85); font-size: 1.25rem; font-weight: 600; padding: 2px 0;">~</div>
+                        <div style="text-align: center; color: var(--text-secondary); font-size: 1.25rem; font-weight: 600; padding: 2px 0;">~</div>
                         <div style="display: flex; gap: 4px;">
                             <select class="modern-select comp-ey" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">
                                 <option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option>
@@ -2390,6 +2439,14 @@ function renderCompSlots() {
             runComparativeAnalysis();
         });
     });
+
+    let stItem = document.getElementById('syncTypeItem');
+    let stPeriod = document.getElementById('syncTypePeriod');
+    if (stItem && stItem.checked) {
+        stItem.dispatchEvent(new Event('change'));
+    } else if (stPeriod && stPeriod.checked) {
+        stPeriod.dispatchEvent(new Event('change'));
+    }
 }
 
 
@@ -2517,3 +2574,126 @@ function runComparativeAnalysis() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+document.addEventListener('DOMContentLoaded', () => {
+    const syncTypeItem = document.getElementById('syncTypeItem');
+    const syncTypePeriod = document.getElementById('syncTypePeriod');
+    const syncCat = document.getElementById('syncCategory');
+    const syncSY = document.getElementById('syncStartYear');
+    const syncSM = document.getElementById('syncStartMonth');
+    const syncEY = document.getElementById('syncEndYear');
+    const syncEM = document.getElementById('syncEndMonth');
+    if (!syncCat || !syncSY) return;
+
+    const dateEls = [syncSY, syncSM, syncEY, syncEM];
+
+    function applySyncDefaults() {
+        let defaultCat = State.ui.selectedCategory;
+        if (defaultCat) {
+            syncCat.value = defaultCat;
+            for(let i=0; i<5; i++) {
+                State.ui.comparativeSelections[i].cat = defaultCat;
+                let cEl = document.querySelector(`.comp-cat[data-idx="${i}"]`);
+                if (cEl) cEl.value = defaultCat;
+            }
+        }
+        
+        if (State.ui.startYear) {
+            syncSY.value = State.ui.startYear;
+            syncSM.value = State.ui.startMonth;
+            syncEY.value = State.ui.endYear;
+            syncEM.value = State.ui.endMonth;
+            for(let i=0; i<5; i++) {
+                State.ui.comparativeSelections[i].startYear = State.ui.startYear;
+                State.ui.comparativeSelections[i].startMonth = State.ui.startMonth;
+                State.ui.comparativeSelections[i].endYear = State.ui.endYear;
+                State.ui.comparativeSelections[i].endMonth = State.ui.endMonth;
+                let syEl = document.querySelector(`.comp-sy[data-idx="${i}"]`); if(syEl) syEl.value = State.ui.startYear;
+                let smEl = document.querySelector(`.comp-sm[data-idx="${i}"]`); if(smEl) smEl.value = State.ui.startMonth;
+                let eyEl = document.querySelector(`.comp-ey[data-idx="${i}"]`); if(eyEl) eyEl.value = State.ui.endYear;
+                let emEl = document.querySelector(`.comp-em[data-idx="${i}"]`); if(emEl) emEl.value = State.ui.endMonth;
+            }
+        }
+        
+        if (typeof runComparativeAnalysis === 'function') runComparativeAnalysis();
+    }
+
+    setTimeout(applySyncDefaults, 500);
+
+    function updateSyncState() {
+        let isItem = syncTypeItem.checked;
+        syncCat.disabled = !isItem;
+        dateEls.forEach(el => el.disabled = isItem);
+        
+        for(let i=0; i<5; i++) {
+            let catEl = document.querySelector(`.comp-cat[data-idx="${i}"]`);
+            if (catEl) catEl.disabled = isItem;
+            
+            ['.comp-sy', '.comp-sm', '.comp-ey', '.comp-em'].forEach(cls => {
+                let dEl = document.querySelector(`${cls}[data-idx="${i}"]`);
+                if (dEl) dEl.disabled = !isItem;
+            });
+        }
+        
+        if (isItem) {
+            syncCat.dispatchEvent(new Event('change'));
+        } else {
+            syncSY.dispatchEvent(new Event('change'));
+        }
+    }
+
+    syncTypeItem.addEventListener('change', updateSyncState);
+    syncTypePeriod.addEventListener('change', updateSyncState);
+
+    syncCat.addEventListener('change', (e) => {
+        if (!syncTypeItem.checked) return;
+        let val = e.target.value;
+        if (val) {
+            for(let i=0; i<5; i++) {
+                State.ui.comparativeSelections[i].cat = val;
+                let cEl = document.querySelector(`.comp-cat[data-idx="${i}"]`);
+                if (cEl) cEl.value = val;
+            }
+            if(typeof runComparativeAnalysis === 'function') runComparativeAnalysis();
+        }
+    });
+
+    dateEls.forEach(el => {
+        el.addEventListener('change', (event) => {
+            if (!syncTypePeriod.checked) return;
+            let hasDateVal = dateEls.some(d => d.value !== "");
+            if (hasDateVal) {
+                let sy = syncSY.value;
+                let sm = syncSM.value;
+                let ey = syncEY.value;
+                let em = syncEM.value;
+                
+                let sIdx = (parseInt(sy) - 2024) * 12 + (parseInt(sm) - 1);
+                let eIdx = (parseInt(ey) - 2024) * 12 + (parseInt(em) - 1);
+                
+                if (sIdx > eIdx) {
+                    if (event && event.target) {
+                        let tid = event.target.id.toLowerCase();
+                        if (tid.includes('end')) {
+                            sy = ey; sm = em;
+                        } else {
+                            ey = sy; em = sm;
+                        }
+                    } else {
+                        ey = sy; em = sm;
+                    }
+                    syncSY.value = sy; syncSM.value = sm;
+                    syncEY.value = ey; syncEM.value = em;
+                }
+
+                for(let i=0; i<5; i++) {
+                    if (syncSY.value) { State.ui.comparativeSelections[i].startYear = syncSY.value; let e = document.querySelector(`.comp-sy[data-idx="${i}"]`); if(e) e.value = syncSY.value; }
+                    if (syncSM.value) { State.ui.comparativeSelections[i].startMonth = syncSM.value; let e = document.querySelector(`.comp-sm[data-idx="${i}"]`); if(e) e.value = syncSM.value; }
+                    if (syncEY.value) { State.ui.comparativeSelections[i].endYear = syncEY.value; let e = document.querySelector(`.comp-ey[data-idx="${i}"]`); if(e) e.value = syncEY.value; }
+                    if (syncEM.value) { State.ui.comparativeSelections[i].endMonth = syncEM.value; let e = document.querySelector(`.comp-em[data-idx="${i}"]`); if(e) e.value = syncEM.value; }
+                }
+                if(typeof runComparativeAnalysis === 'function') runComparativeAnalysis();
+            }
+        });
+    });
+});
