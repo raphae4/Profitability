@@ -64,6 +64,12 @@
                 <!-- Filters -->
                 <section class="filters-bar glass-panel">
                     <div class="filter-group">
+                        <label for="categoryFilter">품목분류 선택</label>
+                        <select id="categoryFilter" class="modern-select">
+                            <!-- Dynamically populated -->
+                        </select>
+                    </div>
+                    <div class="filter-group">
                         <label>조회 기간</label>
                         <div style="display: flex; gap: 8px;">
                             <select id="startYear" class="modern-select" style="min-width: 80px;">
@@ -96,12 +102,6 @@
                                 <option value="11">11월</option> <option value="12" selected>12월</option>
                             </select>
                         </div>
-                    </div>
-                    <div class="filter-group">
-                        <label for="categoryFilter">품목분류 선택</label>
-                        <select id="categoryFilter" class="modern-select">
-                            <!-- Dynamically populated -->
-                        </select>
                     </div>
                 </section>
 
@@ -163,43 +163,43 @@
                     <!-- Filters for Unit Analysis -->
                     <section class="filters-bar glass-panel" style="flex-wrap: wrap; align-items: center;">
                         <div class="filter-group">
-                        <label>조회 기간</label>
-                        <div style="display: flex; gap: 8px;">
-                            <select id="uaStartYear" class="modern-select" style="min-width: 80px;">
-                                <option value="2024">2024년</option>
-                                <option value="2025">2025년</option>
-                                <option value="2026" selected>2026년</option>
-                            </select>
-                            <select id="uaStartMonth" class="modern-select" style="min-width: 70px;">
-                                <option value="01">1월</option> <option value="02">2월</option>
-                                <option value="03">3월</option> <option value="04">4월</option>
-                                <option value="05">5월</option> <option value="06">6월</option>
-                                <option value="07">7월</option> <option value="08">8월</option>
-                                <option value="09">9월</option> <option value="10">10월</option>
-                                <option value="11">11월</option> <option value="12">12월</option>
-                            </select>
-                            <span style="align-self: center; color: var(--text-secondary);">~</span>
-                            <select id="uaEndYear" class="modern-select" style="min-width: 80px;">
-                                <option value="2024">2024년</option>
-                                <option value="2025">2025년</option>
-                                <option value="2026" selected>2026년</option>
-                            </select>
-                            <select id="uaEndMonth" class="modern-select" style="min-width: 70px;">
-                                <option value="01">1월</option> <option value="02">2월</option>
-                                <option value="03">3월</option> <option value="04">4월</option>
-                                <option value="05">5월</option> <option value="06">6월</option>
-                                <option value="07">7월</option> <option value="08">8월</option>
-                                <option value="09">9월</option> <option value="10">10월</option>
-                                <option value="11">11월</option> <option value="12" selected>12월</option>
+                            <label for="uaCategoryFilter">품목분류 선택</label>
+                            <select id="uaCategoryFilter" class="modern-select">
+                                <!-- Dynamically populated -->
                             </select>
                         </div>
-                    </div>
-                    <div class="filter-group">
-                        <label for="uaCategoryFilter">품목분류 선택</label>
-                        <select id="uaCategoryFilter" class="modern-select">
-                            <!-- Dynamically populated -->
-                        </select>
-                    </div>
+                        <div class="filter-group">
+                            <label>조회 기간</label>
+                            <div style="display: flex; gap: 8px;">
+                                <select id="uaStartYear" class="modern-select" style="min-width: 80px;">
+                                    <option value="2024">2024년</option>
+                                    <option value="2025">2025년</option>
+                                    <option value="2026" selected>2026년</option>
+                                </select>
+                                <select id="uaStartMonth" class="modern-select" style="min-width: 70px;">
+                                    <option value="01">1월</option> <option value="02">2월</option>
+                                    <option value="03">3월</option> <option value="04">4월</option>
+                                    <option value="05">5월</option> <option value="06">6월</option>
+                                    <option value="07">7월</option> <option value="08">8월</option>
+                                    <option value="09">9월</option> <option value="10">10월</option>
+                                    <option value="11">11월</option> <option value="12">12월</option>
+                                </select>
+                                <span style="align-self: center; color: var(--text-secondary);">~</span>
+                                <select id="uaEndYear" class="modern-select" style="min-width: 80px;">
+                                    <option value="2024">2024년</option>
+                                    <option value="2025">2025년</option>
+                                    <option value="2026" selected>2026년</option>
+                                </select>
+                                <select id="uaEndMonth" class="modern-select" style="min-width: 70px;">
+                                    <option value="01">1월</option> <option value="02">2월</option>
+                                    <option value="03">3월</option> <option value="04">4월</option>
+                                    <option value="05">5월</option> <option value="06">6월</option>
+                                    <option value="07">7월</option> <option value="08">8월</option>
+                                    <option value="09">9월</option> <option value="10">10월</option>
+                                    <option value="11">11월</option> <option value="12" selected>12월</option>
+                                </select>
+                            </div>
+                        </div>
                     <div style="margin-left: auto; display: flex; gap: 12px; align-items: center;">
                         <button id="btnOpenComparativeAnalysis" class="btn-danger" style="padding: 10px 20px;"><span style="margin-right: 6px; font-size: 1.1em;">📊</span> 품목간 비교</button>
                         <button id="btnOpenReport" class="btn-primary" style="padding: 10px 20px;"><span style="margin-right: 6px; font-size: 1.1em;">📋</span> 분석 보고서</button>
@@ -313,8 +313,31 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
                         <div>
                             <h2>지능형 비즈니스 분석 보고서</h2>
-                            <p id="reportPeriodText" style="color: var(--accent-cyan); font-weight: 500; margin-top: 8px; font-size: 0.95rem;"></p>
-                            <p style="color: var(--text-secondary); margin-top: 4px;">
+                            <div style="display: flex; gap: 24px; margin-top: 16px; align-items: flex-end; flex-wrap: wrap;">
+                                <div class="filter-group">
+                                    <label for="reportCategoryFilter">품목분류 선택</label>
+                                    <select id="reportCategoryFilter" class="modern-select" style="min-width: 150px;"></select>
+                                </div>
+                                <div class="filter-group">
+                                    <label>조회 기간</label>
+                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                        <select id="reportStartYear" class="modern-select" style="min-width: 80px;"><option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option></select>
+                                        <select id="reportStartMonth" class="modern-select" style="min-width: 70px;">
+                                            <option value="01">1월</option> <option value="02">2월</option> <option value="03">3월</option> <option value="04">4월</option>
+                                            <option value="05">5월</option> <option value="06">6월</option> <option value="07">7월</option> <option value="08">8월</option>
+                                            <option value="09">9월</option> <option value="10">10월</option> <option value="11">11월</option> <option value="12">12월</option>
+                                        </select>
+                                        <span style="color: var(--text-secondary);">~</span>
+                                        <select id="reportEndYear" class="modern-select" style="min-width: 80px;"><option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option></select>
+                                        <select id="reportEndMonth" class="modern-select" style="min-width: 70px;">
+                                            <option value="01">1월</option> <option value="02">2월</option> <option value="03">3월</option> <option value="04">4월</option>
+                                            <option value="05">5월</option> <option value="06">6월</option> <option value="07">7월</option> <option value="08">8월</option>
+                                            <option value="09">9월</option> <option value="10">10월</option> <option value="11">11월</option> <option value="12">12월</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <p style="color: var(--text-secondary); margin-top: 12px;">
                                 업로드된 ERP 원천 데이터를 정밀 스캔하여 자동 감지한 한계적자, 조업 손실, 고정비 비중 등 핵심 경영 리스크입니다.
                             </p>
                         </div>

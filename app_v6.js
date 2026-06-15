@@ -83,6 +83,12 @@ const els = {
     uaAccountGrid: document.getElementById('uaAccountGrid'),
     compAccountGrid: document.getElementById('compAccountGrid'),
 
+    reportCategoryFilter: document.getElementById('reportCategoryFilter'),
+    reportStartYear: document.getElementById('reportStartYear'),
+    reportStartMonth: document.getElementById('reportStartMonth'),
+    reportEndYear: document.getElementById('reportEndYear'),
+    reportEndMonth: document.getElementById('reportEndMonth'),
+
     simRateSlider: document.getElementById('simRateSlider'),
     simRateVal: document.getElementById('simRateVal'),
     simOpProfit: document.getElementById('simOpProfit'),
@@ -121,6 +127,13 @@ function init() {
     if (els.startMonth) State.ui.startMonth = els.startMonth.value;
     if (els.endYear) State.ui.endYear = els.endYear.value;
     if (els.endMonth) State.ui.endMonth = els.endMonth.value;
+    
+    if (els.reportStartYear) {
+        els.reportStartYear.value = State.ui.startYear;
+        els.reportStartMonth.value = State.ui.startMonth;
+        els.reportEndYear.value = State.ui.endYear;
+        els.reportEndMonth.value = State.ui.endMonth;
+    }
 
     // Attempt cache load of processed data
     const savedData = localStorage.getItem('profitMatrixData_V5');
@@ -246,9 +259,12 @@ function bindEvents() {
         if (source === 'dashboard') {
             sy = els.startYear.value; sm = els.startMonth.value;
             ey = els.endYear.value; em = els.endMonth.value;
-        } else {
+        } else if (source === 'ua') {
             sy = els.uaStartYear.value; sm = els.uaStartMonth.value;
             ey = els.uaEndYear.value; em = els.uaEndMonth.value;
+        } else if (source === 'report') {
+            sy = els.reportStartYear.value; sm = els.reportStartMonth.value;
+            ey = els.reportEndYear.value; em = els.reportEndMonth.value;
         }
         
         let sIdx = (parseInt(sy) - 2024) * 12 + (parseInt(sm) - 1);
@@ -274,6 +290,10 @@ function bindEvents() {
         els.endYear.value = ey; els.endMonth.value = em;
         els.uaStartYear.value = sy; els.uaStartMonth.value = sm;
         els.uaEndYear.value = ey; els.uaEndMonth.value = em;
+        if(els.reportStartYear) {
+            els.reportStartYear.value = sy; els.reportStartMonth.value = sm;
+            els.reportEndYear.value = ey; els.reportEndMonth.value = em;
+        }
         
         updateDashboard();
         updateUnitAnalysis();
@@ -288,9 +308,10 @@ function bindEvents() {
         let val = els.categoryFilter.value;
         State.ui.selectedCategory = val;
         els.uaCategoryFilter.value = val;
+        if(els.reportCategoryFilter) els.reportCategoryFilter.value = val;
         State.unitAnalysis.selectedCategory = val;
-        // Account reset removed to preserve user selection
         updateDashboard();
+        updateAnalysisReport();
         renderAccountCheckboxes();
     });
 
@@ -302,12 +323,30 @@ function bindEvents() {
     els.uaCategoryFilter.addEventListener('change', (e) => {
         let val = e.target.value;
         State.unitAnalysis.selectedCategory = val;
-        // Account reset removed to preserve user selection
         els.categoryFilter.value = val;
+        if(els.reportCategoryFilter) els.reportCategoryFilter.value = val;
         State.ui.selectedCategory = val;
         renderAccountCheckboxes();
         updateDashboard();
+        updateAnalysisReport();
     });
+
+    if(els.reportStartYear) {
+        els.reportStartYear.addEventListener('change', (e) => handleDateChange('report', e));
+        els.reportStartMonth.addEventListener('change', (e) => handleDateChange('report', e));
+        els.reportEndYear.addEventListener('change', (e) => handleDateChange('report', e));
+        els.reportEndMonth.addEventListener('change', (e) => handleDateChange('report', e));
+        els.reportCategoryFilter.addEventListener('change', (e) => {
+            let val = e.target.value;
+            State.ui.selectedCategory = val;
+            els.categoryFilter.value = val;
+            els.uaCategoryFilter.value = val;
+            State.unitAnalysis.selectedCategory = val;
+            renderAccountCheckboxes();
+            updateDashboard();
+            updateAnalysisReport();
+        });
+    }
 
     // Synchronize scroll between Chart and Table in Unit Analysis, and make Y-Axis sticky
     setTimeout(() => {
@@ -777,6 +816,7 @@ function processCategories() {
     });
     els.categoryFilter.innerHTML = html;
     els.uaCategoryFilter.innerHTML = uaHtml;
+    if(els.reportCategoryFilter) els.reportCategoryFilter.innerHTML = html;
     let syncCat = document.getElementById('syncCategory');
     if (syncCat) syncCat.innerHTML = '<option value="">-- 품목분류 선택 --</option>' + uaHtml;
     
@@ -786,6 +826,7 @@ function processCategories() {
         els.categoryFilter.value = defaultCat;
         State.unitAnalysis.selectedCategory = defaultCat;
         els.uaCategoryFilter.value = defaultCat;
+        if(els.reportCategoryFilter) els.reportCategoryFilter.value = defaultCat;
         State.unitAnalysis.selectedAccounts = ['매출액', '영업이익'];
     }
     
@@ -1516,11 +1557,6 @@ function initCharts() {
 // ==========================================
 function updateAnalysisReport() {
     if (!els.detectedIssuesGrid) return;
-    
-    let reportPeriodEl = document.getElementById('reportPeriodText');
-    if (reportPeriodEl) {
-        reportPeriodEl.innerText = `분석 대상 기간: ${State.ui.startYear}년 ${State.ui.startMonth}월 ~ ${State.ui.endYear}년 ${State.ui.endMonth}월`;
-    }
 
     if (!State.processedData.categories.length) {
         els.dangerCount.innerText = '0';
@@ -1581,7 +1617,7 @@ function updateAnalysisReport() {
     let allIssues = [];
     let dCount = 0, wCount = 0, iCount = 0;
     
-    let categoriesToAnalyze = [tc, ...State.processedData.categories.filter(c => c !== tc)];
+    let categoriesToAnalyze = [selCat];
     
     categoriesToAnalyze.forEach(cat => {
         let res = runIssueDetection(cat);
@@ -1607,6 +1643,7 @@ function updateAnalysisReport() {
         `;
     } else {
         let groups = {
+            '단가 및 채산성 (Unit Price & Margin)': [],
             '매출액 (Sales & Volume)': [],
             '영업손익 및 수익성 (Profitability & BEP)': [],
             '재료비 (Material Cost)': [],
@@ -1617,6 +1654,11 @@ function updateAnalysisReport() {
         };
         
         allIssues.forEach(issue => {
+            // "단가 특화:" 태그가 있는 이슈는 '단가 및 채산성' 그룹으로 강제 이동
+            if (issue.title.includes('단가 특화:')) {
+                issue.group = '단가 및 채산성 (Unit Price & Margin)';
+                issue.title = issue.title.replace('단가 특화: ', ''); // 제목에서 태그 제거
+            }
             if (!groups[issue.group]) groups[issue.group] = [];
             groups[issue.group].push(issue);
         });
@@ -1698,7 +1740,7 @@ function runIssueDetection(targetCat) {
             sales: 0, valLoss: 0, grossProfit: 0, varMfg: 0, fixedMfg: 0, 
             sga: 0, material: 0, labor: 0, others: 0, marginalProfit: 0, 
             deprecMaintInd: 0, bep: 0, opProfit: 0,
-            salesData: [], opProfitData: []
+            salesData: [], opProfitData: [], otherBreakdown: []
         };
 
         let fullTrend = {
@@ -1746,6 +1788,7 @@ function runIssueDetection(targetCat) {
             if (lbl.includes('외주가공비') || lbl.includes('전력비') || lbl.includes('소모품비') || lbl.includes('포장비') || lbl.includes('외주요역비') || lbl.includes('일반가공비') || lbl.includes('소모공구비') || lbl.includes('Royalty') || lbl.includes('로열티')) {
                 if (accObj.level === 3 || (accObj.level === 2 && !Object.keys(fin).some(k => fin[k].level === 3 && k.startsWith(accObj.key + '_')))) {
                     m.others += total;
+                    m.otherBreakdown.push({ name: lbl, amount: total });
                     rawData.forEach((v,i)=> fullTrend.others[i]+=v);
                 }
             }
@@ -1943,13 +1986,43 @@ function runIssueDetection(targetCat) {
         // 7. Other Major Expenses
         if (m.sales > 0 && m.others > 0 && (m.others / m.sales) > 0.15) {
             infoCount++;
+            
+            let breakdownText = "";
+            if (m.otherBreakdown && m.otherBreakdown.length > 0) {
+                m.otherBreakdown.sort((a,b) => b.amount - a.amount);
+                
+                let getAccountIssue = (name, amount, sales) => {
+                    let pct = sales > 0 ? ((amount / sales) * 100).toFixed(1) + '%' : 'N/A';
+                    let baseStr = `<span style="color:var(--accent-red); font-weight:600;">매출 비중 ${pct}</span>`;
+                    if (name.includes('외주가공') || name.includes('일반가공')) return `외주 의존도가 높음. 내재화 또는 단가 재협상 검토 요망 (${baseStr})`;
+                    if (name.includes('전력비')) return `유틸리티 부담 큼. 전력 누수 점검 및 에너지 효율화 필요 (${baseStr})`;
+                    if (name.includes('소모품') || name.includes('소모공구')) return `소모성 자재 과다. 공구 수명 연장 및 구매 통제 강화 필요 (${baseStr})`;
+                    if (name.includes('포장비')) return `포장 사양 최적화 및 저단가 대체재 발굴 필요 (${baseStr})`;
+                    if (name.includes('외주요역') || name.includes('용역')) return `아웃소싱 효율성 재평가 및 투입 인력 최적화 필요 (${baseStr})`;
+                    if (name.toLowerCase().includes('royalty') || name.includes('로열티')) return `고정성 수수료 부담 큼. 계약 조건 재검토 및 갱신 시 협상 필요 (${baseStr})`;
+                    return `비용 구조 점검 및 절감 방안 수립 필요 (${baseStr})`;
+                };
+
+                let topItemsHtml = m.otherBreakdown.slice(0, 4).filter(x => x.amount > 0).map(x => {
+                    let issueText = getAccountIssue(x.name, x.amount, m.sales);
+                    return `<div style="margin-top: 8px; padding-left: 10px; border-left: 3px solid var(--accent-cyan);">
+                        <span style="font-weight: 600; color: var(--text-primary);">${x.name} (${formatCurr(x.amount)})</span><br>
+                        <span style="color: var(--text-secondary); font-size: 0.9em; line-height: 1.4; display: inline-block; margin-top: 2px;">• ${issueText}</span>
+                    </div>`;
+                }).join('');
+
+                if (topItemsHtml) {
+                    breakdownText = `<div style="margin-top: 16px;"><span style="color:var(--text-primary); font-weight:600;">[주요 계정별 현황 및 문제점]</span>${topItemsHtml}</div>`;
+                }
+            }
+
             issues.push({
                 group: '고정제조비 및 판관비 (Fixed Mfg & SG&A Expenses)',
                 targetCat: targetCat,
                 level: 'info',
                 badge: '정보',
                 title: `[${displayCat}] 8대 기타 주요 경비 과다`,
-                desc: `외주가공, 전력비, 소모품 등 주요 경비 합산액이 ${formatCurr(m.others)}으로 매출의 ${((m.others/m.sales)*100).toFixed(1)}%를 차지합니다. 추가 절감 여력이 있는지 점검이 필요합니다.` + getTrendContextHtml(fullTrend.others, fullTrend.sales, eIdx),
+                desc: `주요 경비 합산액이 ${formatCurr(m.others)}으로 매출의 ${((m.others/m.sales)*100).toFixed(1)}%를 차지합니다. 추가 절감 여력이 있는지 점검이 필요합니다.` + breakdownText + getTrendContextHtml(fullTrend.others, fullTrend.sales, eIdx),
                 action: { title: '추천 조치 계획', p: '• 1단계: 외주가공 공정의 내재화 검토 및 전력 누수 타임 개선<br>• 2단계: 소모공구 수명 연장 활동 및 비품 구매 승인 절차 강화' }
             });
         }
@@ -2049,7 +2122,10 @@ function runIssueDetection(targetCat) {
                 }
                 
                 let materialData = new Array(periodLength).fill(0);
-                let varMfgData = new Array(periodLength).fill(0);
+                let varCostData = new Array(periodLength).fill(0);
+                let fixedCostData = new Array(periodLength).fill(0);
+                let opProfitData = new Array(periodLength).fill(0);
+                
                 Object.keys(fin).forEach(accKey => {
                     let accObj = fin[accKey];
                     let lbl = accObj.label.replace(/\s+/g, '');
@@ -2060,8 +2136,14 @@ function runIssueDetection(targetCat) {
                             d.forEach((v, i) => materialData[i] += v);
                         }
                     }
-                    if (accKey.startsWith('변동제조비') && accObj.level === 1) {
-                        varMfgData = d;
+                    if ((accKey.startsWith('변동제조비') || accKey.startsWith('변동판매비')) && accObj.level === 1) {
+                        d.forEach((v, i) => varCostData[i] += v);
+                    }
+                    if ((accKey.startsWith('고정제조비') || accKey.startsWith('고정판매비') || accKey.startsWith('일반관리비')) && accObj.level === 1) {
+                        d.forEach((v, i) => fixedCostData[i] += v);
+                    }
+                    if (lbl === '영업이익') {
+                        opProfitData = d;
                     }
                 });
                 
@@ -2084,8 +2166,47 @@ function runIssueDetection(targetCat) {
                     }
                 }
                 
-                if (varMfgData[effEnd] > 0) {
-                    let endUVC = varMfgData[effEnd] / endVol;
+                if (fixedCostData[effStart] > 0) {
+                    let startUFC = fixedCostData[effStart] / startVol;
+                    let endUFC = fixedCostData[effEnd] / endVol;
+                    
+                    if (endUFC > startUFC * 1.10) {
+                        let riseRate = ((endUFC - startUFC) / startUFC * 100).toFixed(1);
+                        warningCount++;
+                        issues.push({
+                            group: '고정제조비 및 판관비 (Fixed Mfg & SG&A Expenses)',
+                            targetCat: targetCat,
+                            level: 'warning',
+                            badge: '주의',
+                            title: `[${displayCat}] 단가 특화: 단위당 고정비(UFC) 급등`,
+                            desc: `선택 기간 내 수량 감소 또는 고정비 증가로 인해 마지막 데이터 월의 단위당 고정비가 ${riseRate}% 상승하였습니다. (시작월: ${formatCurr(startUFC)} -> 마지막월: ${formatCurr(endUFC)})`,
+                            action: { title: '추천 조치 계획', p: '• 1단계: 라인 가동률 점검 및 비효율 고정 경비 통제<br>• 2단계: 가동률 회복을 위한 최소 수주 물량 확보' }
+                        });
+                    }
+                }
+
+                if (opProfitData[effStart] !== undefined) {
+                    let startUOP = opProfitData[effStart] / startVol;
+                    let endUOP = opProfitData[effEnd] / endVol;
+                    
+                    if (endUOP < 0 || (startUOP > 0 && endUOP < startUOP * 0.70)) {
+                        let isDeficit = endUOP < 0;
+                        let descText = isDeficit ? `마지막 데이터 월 기준 단위당 영업이익이 적자(${formatCurr(endUOP)}) 상태입니다.` : `단위당 영업이익이 시작월 대비 30% 이상 급감하였습니다. (시작월: ${formatCurr(startUOP)} -> 마지막월: ${formatCurr(endUOP)})`;
+                        dangerCount++;
+                        issues.push({
+                            group: '영업손익 및 수익성 (Profitability & BEP)',
+                            targetCat: targetCat,
+                            level: 'danger',
+                            badge: '위험',
+                            title: `[${displayCat}] 단가 특화: 단위당 영업이익(UOP) ${isDeficit ? '적자' : '급감'}`,
+                            desc: `선택 기간 내 수익성이 크게 악화되어 ${descText}`,
+                            action: { title: '추천 조치 계획', p: '• 1단계: 단위당 원가(변동비/고정비) 및 판가(P) 구성 요소 전면 분석<br>• 2단계: 마진 악화 품목의 판가 인상 또는 원가 절감 태스크포스(TF) 가동' }
+                        });
+                    }
+                }
+                
+                if (varCostData[effEnd] > 0) {
+                    let endUVC = varCostData[effEnd] / endVol;
                     
                     if (endUP < endUVC) {
                         dangerCount++;
@@ -2095,8 +2216,8 @@ function runIssueDetection(targetCat) {
                             level: 'danger',
                             badge: '위험',
                             title: `[${displayCat}] 단가 특화: 단위당 한계적자 (역마진)`,
-                            desc: `선택 기간 내 마지막 데이터 월 기준 단위당 판매가(${formatCurr(endUP)})가 단위당 변동비(${formatCurr(endUVC)})보다 낮아 생산할수록 손실이 커지는 역마진 상태입니다.`,
-                            action: { title: '추천 조치 계획', p: '• 1단계: 해당 제품의 수익성(BOM 원가) 즉시 전면 재검토<br>• 2단계: 손실 품목 수주 중단 또는 판가 인상 강력 추진' }
+                            desc: `선택 기간 내 마지막 데이터 월 기준 단위당 판매가(${formatCurr(endUP)})가 총 단위당 변동비(${formatCurr(endUVC)})보다 낮아 생산할수록 손실이 커지는 역마진 상태입니다.`,
+                            action: { title: '추천 조치 계획', p: '• 1단계: 해당 제품의 수익성(BOM 원가 및 판매비) 즉시 전면 재검토<br>• 2단계: 손실 품목 수주 중단 또는 판가 인상 강력 추진' }
                         });
                     }
                 }
@@ -2150,6 +2271,69 @@ function runExchangeSimulation(percentChange) {
 
     // Update ApexChart
     if (State.charts.simTrend) {
+        let simColor = '#06b6d4';
+        if (percentChange > 0) {
+            let lightness = 85 - (percentChange * 4); // 1%일때 81%, 10%일때 45% (점점 짙어짐)
+            simColor = `hsl(158, 84%, ${lightness}%)`; // Green 계열
+        } else if (percentChange < 0) {
+            let lightness = 85 - (Math.abs(percentChange) * 4);
+            simColor = `hsl(0, 84%, ${lightness}%)`; // Red 계열
+        }
+
+        let calcNiceBound = (val) => {
+            if (val === 0) return 0;
+            let absVal = Math.abs(val);
+            let mag = Math.pow(10, Math.floor(Math.log10(absVal)));
+            let fraction = absVal / mag;
+            let niceFraction;
+            if (fraction <= 1) niceFraction = 1;
+            else if (fraction <= 2) niceFraction = 2;
+            else if (fraction <= 5) niceFraction = 5;
+            else niceFraction = 10;
+            let nice = niceFraction * mag;
+            return val < 0 ? -nice : nice;
+        };
+
+        let targetMax = originalOpProfit > 0 ? originalOpProfit * 1.2 : 0;
+        let targetMin = originalOpProfit < 0 ? originalOpProfit * 1.2 : 0;
+        
+        let yMax = calcNiceBound(targetMax);
+        let yMin = calcNiceBound(targetMin);
+        if (yMax === 0 && yMin === 0) {
+            yMax = 1000;
+        }
+
+        State.charts.simTrend.updateOptions({ 
+            colors: ['#06b6d4', simColor],
+            yaxis: { 
+                min: yMin, 
+                max: yMax, 
+                tickAmount: 5,
+                labels: { formatter: (val) => formatShort(val) } 
+            },
+            dataLabels: {
+                enabled: true,
+                formatter: function (val, opts) {
+                    if (opts.dataPointIndex === 1) {
+                        return `${percentChange > 0 ? '+' : ''}${percentChange}%`;
+                    }
+                    return '';
+                },
+                style: {
+                    colors: ['#ffffff'],
+                    fontSize: '12px',
+                    fontWeight: '600'
+                },
+                background: {
+                    enabled: true,
+                    foreColor: '#000000',
+                    padding: 4,
+                    borderRadius: 2,
+                    borderWidth: 0,
+                    opacity: 0.15
+                }
+            }
+        });
         State.charts.simTrend.updateSeries([{
             name: '영업이익 (원)',
             data: [
@@ -2225,8 +2409,11 @@ function formatCurr(val) { return '₩ ' + Math.round(val).toLocaleString('ko-KR
 function formatNum(val) { return Math.round(val).toLocaleString('ko-KR'); }
 function formatUnit(val) { return Number(val).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
 function formatShort(val) {
-    if (val >= 100000000) return (val / 100000000).toFixed(1) + '억';
-    if (val >= 1000000) return (val / 1000000).toFixed(1) + '백만';
+    let abs = Math.abs(val);
+    let sign = val < 0 ? '-' : '';
+    // 소수점 .0으로 끝나는 경우 깔끔하게 정수로 떨어지게 replace('.0', '')
+    if (abs >= 100000000) return sign + (abs / 100000000).toFixed(1).replace('.0', '') + '억';
+    if (abs >= 1000000) return sign + (abs / 1000000).toFixed(1).replace('.0', '') + '백만';
     return Math.round(val).toLocaleString();
 }
 // ==========================================
@@ -2257,29 +2444,34 @@ function initComparativeAnalysis() {
                     let em = State.ui.endMonth || '04';
                     
                     let tcFin = State.processedData.financials[State.processedData.totalCompany];
+                    let latestIdx = 35; // Default to 2026-12
                     if (tcFin) {
                         let salesAcc = Object.values(tcFin).find(a => a.key && a.key.includes('매출액'));
                         if (salesAcc && salesAcc.data) {
                             let extractedData = extractPeriodicData(salesAcc.data);
-                            let latestIdx = 35; // Default to 2026-12
                             for (let i = 35; i >= 0; i--) {
                                 if (Math.abs(extractedData[i]) > 1) { // checking > 1 to avoid rounding noise
                                     latestIdx = i;
                                     break;
                                 }
                             }
-                            ey = String(2024 + Math.floor(latestIdx / 12));
-                            em = String((latestIdx % 12) + 1).padStart(2, '0');
                         }
                     }
+                    
+                    ey = String(2024 + Math.floor(latestIdx / 12));
+                    em = String((latestIdx % 12) + 1).padStart(2, '0');
                     
                     let defaultCat = State.ui.selectedCategory || (State.processedData.categories.includes(State.processedData.totalCompany) ? State.processedData.totalCompany : State.processedData.categories[0]);
                     
                     for(let i=0; i<5; i++) {
-                        State.ui.comparativeSelections[i].startYear = ey;
-                        State.ui.comparativeSelections[i].startMonth = em;
-                        State.ui.comparativeSelections[i].endYear = ey;
-                        State.ui.comparativeSelections[i].endMonth = em;
+                        let offsetIdx = Math.max(0, latestIdx - (4 - i));
+                        let sy = String(2024 + Math.floor(offsetIdx / 12));
+                        let sm = String((offsetIdx % 12) + 1).padStart(2, '0');
+
+                        State.ui.comparativeSelections[i].startYear = sy;
+                        State.ui.comparativeSelections[i].startMonth = sm;
+                        State.ui.comparativeSelections[i].endYear = sy;
+                        State.ui.comparativeSelections[i].endMonth = sm;
                         State.ui.comparativeSelections[i].cat = defaultCat;
                     }
                     
@@ -2377,7 +2569,7 @@ function renderCompSlots() {
                             </select>
                             <select class="modern-select comp-sm" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">${mOptions}</select>
                         </div>
-                        <div style="text-align: center; color: var(--text-secondary); font-size: 1.25rem; font-weight: 600; padding: 2px 0;">~</div>
+                        <div style="text-align: center; color: var(--text-secondary); font-size: 1rem; font-weight: 600; line-height: 1; margin: -2px 0;">~</div>
                         <div style="display: flex; gap: 4px;">
                             <select class="modern-select comp-ey" data-idx="${i}" style="flex: 1; min-width: 0; padding: 6px;">
                                 <option value="2024">2024년</option><option value="2025">2025년</option><option value="2026">2026년</option>

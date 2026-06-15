@@ -257,6 +257,15 @@ body {
   border-bottom: 1px solid var(--border-color) !important;
 }
 
+/* 분석 보고서 상단 필터 고정 */
+.report-header {
+  position: sticky;
+  top: 120px;
+  z-index: 98;
+  background: #ffffff !important; /* 스크롤 시 뒤쪽 내용 비침 방지 */
+  border-bottom: 1px solid var(--border-color);
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;
@@ -509,6 +518,24 @@ body {
     width: 100%;
     border-collapse: collapse;
     min-width: 800px;
+}
+
+/* 품목간 비교 영역의 테이블 헤더 상단 고정 */
+#comparativeAnalysisView .table-scroll-wrapper {
+    max-height: calc(100vh - 300px);
+    overflow-y: auto;
+}
+#comparativeTableHead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg-base) !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+#comparativeTableHead th:first-child {
+    z-index: 20; /* 왼쪽 첫 열과 상단 첫 행이 겹치는 좌상단은 항상 최상위 */
+    left: 0;
+    top: 0;
 }
 
 /* Sticky First Column for Rate Table */
