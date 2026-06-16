@@ -187,34 +187,121 @@ function bindEvents() {
     let btnDownloadPDF = document.getElementById('btnDownloadPDF');
     if (btnDownloadPDF) {
         btnDownloadPDF.addEventListener('click', () => {
-            const element = document.getElementById('reportView');
+            const printTemplate = document.getElementById('pdfPrintTemplate');
             const originalText = btnDownloadPDF.innerHTML;
             btnDownloadPDF.innerHTML = '<span style="margin-right: 6px;">⏳</span> PDF 생성중...';
             
-            // PDF 렌더링 시 배경색과 글자색이 깨지지 않도록 강제 주입
-            const originalBg = element.style.backgroundColor;
-            const originalColor = element.style.color;
-            const originalPadding = element.style.padding;
+            // Populate meta data
+            const targetCat = State.ui.selectedCategory || '전체 (합산)';
+            document.getElementById('pdfTargetCategory').innerText = targetCat;
             
-            element.style.backgroundColor = '#0B0F19';
-            element.style.color = '#f8fafc';
-            element.style.padding = '10px';
+            const now = new Date();
+            document.getElementById('pdfPrintDate').innerText = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
             
-            // 내부의 모든 텍스트 요소가 너무 밝은 회색으로 묻히지 않게 조치 (필요시)
+            const startYear = document.getElementById('reportStartYear').value;
+            const startMonth = document.getElementById('reportStartMonth').value;
+            const endYear = document.getElementById('reportEndYear').value;
+            const endMonth = document.getElementById('reportEndMonth').value;
+            document.getElementById('pdfTargetPeriod').innerText = `${startYear}년 ${startMonth}월 ~ ${endYear}년 ${endMonth}월`;
+            
+            // Populate scores
+            document.getElementById('pdfDangerCount').innerText = document.getElementById('dangerCount').innerText;
+            document.getElementById('pdfWarningCount').innerText = document.getElementById('warningCount').innerText;
+            document.getElementById('pdfInfoCount').innerText = document.getElementById('infoCount').innerText;
+            
+            // Populate issues
+            const issuesList = document.getElementById('pdfIssuesList');
+            issuesList.innerHTML = '';
+            if (State.detectedIssues && State.detectedIssues.length > 0) {
+                State.detectedIssues.forEach(issue => {
+                    let levelClass = issue.level === 'danger' ? 'danger' : (issue.level === 'warning' ? 'warning' : 'info');
+                    let levelText = issue.level === 'danger' ? '위험' : (issue.level === 'warning' ? '주의' : '정보/정상');
+                    
+                    let metaText = `분석 기간: ${startYear}년 ${startMonth}월 ~ ${endYear}년 ${endMonth}월 | 분석 그룹: ${issue.group}`;
+                    if (issue.targetCat) metaText += ` | 분석 대상: ${issue.targetCat}`;
+                    
+                    // Create description html
+                    let descHtml = '';
+                    if (Array.isArray(issue.desc)) {
+                        descHtml = '<ul>' + issue.desc.map(d => `<li>${d}</li>`).join('') + '</ul>';
+                    } else if (typeof issue.desc === 'string') {
+                        descHtml = `<div class="print-issue-desc-text">${issue.desc}</div>`;
+                    }
+                    
+                    let actionHtml = '';
+                    if (issue.action) {
+                        actionHtml = `
+                            <div class="print-issue-action-box">
+                                <strong>🛠️ ${issue.action.title || '추천 조치 계획'}</strong>
+                                <p>${issue.action.p || ''}</p>
+                            </div>
+                        `;
+                    }
+                    
+                    issuesList.innerHTML += `
+                        <div class="print-issue-item ${levelClass}">
+                            <div class="print-issue-title">[${levelText}] ${issue.title}</div>
+                            <div class="print-issue-meta">${metaText}</div>
+                            ${descHtml}
+                            ${actionHtml}
+                        </div>
+                    `;
+                });
+            } else {
+                issuesList.innerHTML = '<p>감지된 경영 리스크가 없습니다.</p>';
+            }
+            
+            // FX Insight data (if available)
+            const simSection = document.getElementById('pdfSimulationSection');
+            const simContent = document.getElementById('pdfSimulationContent');
+            const fxInsightLayout = document.querySelector('.fx-insight-layout');
+            
+            if (fxInsightLayout && document.getElementById('exchangeRateSection') && document.getElementById('exchangeRateSection').style.display !== 'none') {
+                simSection.style.display = 'block';
+                // Clone the insight layout to PDF and force flex layout for html2pdf compatibility
+                simContent.innerHTML = `<div style="display: flex; gap: 20px; font-size: 0.95rem;">
+                    ${fxInsightLayout.innerHTML}
+                </div>`;
+            } else {
+                simSection.style.display = 'none';
+            }
+            // Show Modal instead of direct download
+            const modal = document.getElementById('reportPreviewModal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+            btnDownloadPDF.innerHTML = originalText;
+        });
+    }
+    
+    // Modal buttons
+    let btnModalClose = document.getElementById('btnModalClose');
+    if (btnModalClose) {
+        btnModalClose.addEventListener('click', () => {
+            document.getElementById('reportPreviewModal').style.display = 'none';
+        });
+    }
+    
+    let btnModalDownloadPDF = document.getElementById('btnModalDownloadPDF');
+    if (btnModalDownloadPDF) {
+        btnModalDownloadPDF.addEventListener('click', () => {
+            const printTemplate = document.getElementById('pdfPrintTemplate');
+            const originalText = btnModalDownloadPDF.innerHTML;
+            btnModalDownloadPDF.innerHTML = '⏳ 생성중...';
+            
             const opt = {
-                margin:       10,
-                filename:     `Profitability_Report_${State.ui.selectedCategory || 'Total'}.pdf`,
+                margin:       15,
+                filename:     `Intelligent_Analysis_Report_${State.ui.selectedCategory || 'Total'}.pdf`,
                 image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true, logging: false, backgroundColor: '#0B0F19' },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
                 jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
             
-            html2pdf().set(opt).from(element).save().then(() => {
-                // 원래 상태로 복구
-                element.style.backgroundColor = originalBg;
-                element.style.color = originalColor;
-                element.style.padding = originalPadding;
-                btnDownloadPDF.innerHTML = originalText;
+            html2pdf().set(opt).from(printTemplate).save().then(() => {
+                btnModalDownloadPDF.innerHTML = originalText;
+            }).catch(err => {
+                console.error("PDF generation failed:", err);
+                btnModalDownloadPDF.innerHTML = originalText;
             });
         });
     }
@@ -1407,7 +1494,10 @@ function updateUnitAnalysis() {
         let bodyHtml = '';
         unitSeries.forEach(series => {
             let displayName = series.name === '매출액' ? '매출단가' : series.name;
-            bodyHtml += `<tr><td style="text-align: left; padding-left: 16px;">${displayName}</td>`;
+            let nameStyle = "font-size: 0.85rem;"; // 전체 폰트 사이즈 축소
+            if (displayName.length >= 14) nameStyle = "font-size: 0.7rem; letter-spacing: -0.5px;";
+            else if (displayName.length >= 10) nameStyle = "font-size: 0.75rem; letter-spacing: -0.3px;";
+            bodyHtml += `<tr><td style="text-align: left; padding-left: 16px; ${nameStyle}">${displayName}</td>`;
             series.data.forEach((val, idx) => {
                 let isAvg = (idx === series.data.length - 1);
                 let rev = State.currentUnitRev[idx];
@@ -1537,19 +1627,6 @@ function initCharts() {
         ...opts, tooltip: { theme: 'light' }, series: [{ name: '환율 (원/동*100)', data: [] }], chart: { ...opts.chart, type: 'area', height: 250 }, colors: ['#f59e0b'], fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } }, markers: { size: 3, hover: { size: 5 } }, dataLabels: { enabled: false }, stroke: { curve: 'smooth', width: 2 }, xaxis: { type: 'category', tickPlacement: 'on', categories: [], tickAmount: 12, labels: { style: { colors: '#94a3b8' } } }, yaxis: { min: 5.00, max: 6.00, title: { text: '환율 (KRW/VND*100)' }, labels: { formatter: (val) => val.toFixed(2) } }
     });
     State.charts.rate.render();
-
-    State.charts.simTrend = new ApexCharts(document.querySelector("#simChart"), {
-        ...opts,
-        tooltip: { theme: 'light', y: { formatter: (val) => '₩ ' + Math.round(val).toLocaleString('ko-KR') } },
-        series: [{ name: '영업이익 (원)', data: [] }],
-        chart: { ...opts.chart, type: 'bar', height: 200 },
-        colors: ['#06b6d4'],
-        plotOptions: { bar: { borderRadius: 4, columnWidth: '40%', distributed: true } },
-        dataLabels: { enabled: false },
-        xaxis: { type: 'category', categories: ['현재 환율', '가상 환율'] },
-        yaxis: { labels: { formatter: (val) => Math.round(val).toLocaleString() } }
-    });
-    State.charts.simTrend.render();
 }
 
 // ==========================================
@@ -1575,9 +1652,8 @@ function updateAnalysisReport() {
     let tc = State.processedData.totalCompany;
     let selCat = State.ui.selectedCategory || tc;
 
-    // --- 환율 변동성 민감도 고정 섹션 (항상 하단 표시) ---
+    // --- 환율 변동성 인사이트 섹션 표시 여부 결정 ---
     let exchangeRateSection = document.getElementById('exchangeRateSection');
-    let exchangeRateSensitivityCard = document.getElementById('exchangeRateSensitivityCard');
     
     let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
     let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
@@ -1587,26 +1663,10 @@ function updateAnalysisReport() {
     if (State.processedData.financials[tc]) {
         let fin = State.processedData.financials[tc];
         let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
-        let opProfit = extractPeriodicData(fin['영업이익']?.data).slice(sIdx, eIdx + 1);
         let totalSales = sales.reduce((a, b) => a + b, 0);
-        let totalOpProfit = opProfit.reduce((a, b) => a + b, 0);
 
-        if (totalSales > 0 && exchangeRateSection && exchangeRateSensitivityCard) {
+        if (totalSales > 0 && exchangeRateSection) {
             exchangeRateSection.style.display = 'block';
-            let rateDeclineImpact = totalOpProfit * 0.1;
-            let sensitivityHtml = `
-                <div class="issue-card glass-panel info">
-                    <div class="issue-card-header">
-                        <h4 class="issue-title"><span class="issue-badge info">정보</span>환율(KRW/USD) 변동에 따른 영업이익 민감도</h4>
-                    </div>
-                    <p class="issue-desc">현재 조회 기간의 베트남 법인 총 매출은 ${formatCurr(totalSales)}이며 원화 영업이익은 ${formatCurr(totalOpProfit)}입니다. 베트남 법인의 제품 판가(수출) 및 주요 원부자재 결제 통화는 미국 달러(USD) 기반이므로, KRW/USD 환율이 10% 상승할 시 원화 환산 영업이익이 약 ${formatCurr(rateDeclineImpact)} 증가하며, 10% 하락할 시 동일 금액만큼 감소하는 고민감 리스크 구조입니다.</p>
-                    <div class="issue-action-box">
-                        <strong>추천 위험 관리 계획</strong>
-                        <p>• 1단계: 하단의 KRW/USD 환율 가상 시뮬레이터를 활용한 원화 변동성 정기 모니터링 체계 가동<br>• 2단계: 현지 내수 매출 확대 및 결제 통화 포트폴리오 다변화로 특정 외환 의존도 감소<br>• 3단계: 환변동 보험 가입 또는 은행 연계 통화선도 계약을 통해 연간 경영계획 목표 손익 선제적 방어</p>
-                    </div>
-                </div>
-            `;
-            exchangeRateSensitivityCard.innerHTML = sensitivityHtml;
         } else if (exchangeRateSection) {
             exchangeRateSection.style.display = 'none';
         }
@@ -1626,6 +1686,8 @@ function updateAnalysisReport() {
         wCount += res.warningCount;
         iCount += res.infoCount;
     });
+
+    State.detectedIssues = allIssues; // Store globally for PDF generation
 
     // Update Counters
     els.dangerCount.innerText = dCount;
@@ -1705,16 +1767,8 @@ function updateAnalysisReport() {
         els.detectedIssuesGrid.innerHTML = html;
     }
 
-    // Trigger Simulator with current slider value
-    let currentSliderVal = els.simRateSlider ? parseInt(els.simRateSlider.value) : 0;
-    runExchangeSimulation(currentSliderVal);
-
-    // Resize simulator chart since it might have been hidden
-    setTimeout(() => {
-        if (State.charts.simTrend) {
-            window.dispatchEvent(new Event('resize'));
-        }
-    }, 100);
+    // Generate Exchange Rate Insights
+    generateExchangeRateInsights();
 }
 
 function runIssueDetection(targetCat) {
@@ -2228,155 +2282,122 @@ function runIssueDetection(targetCat) {
     return { issues, dangerCount, warningCount, infoCount };
 }
 
-function runExchangeSimulation(percentChange) {
+function generateExchangeRateInsights() {
     let cat = State.ui.selectedCategory;
-    if (cat === 'All') cat = State.processedData.totalCompany;
+    if (!cat || cat === 'All') cat = State.processedData.totalCompany;
     if (!cat || !State.processedData.financials[cat]) return;
 
-    let sIdx = (parseInt(State.ui.startYear) - 2024) * 12 + (parseInt(State.ui.startMonth) - 1);
-    let eIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
-    sIdx = Math.max(0, Math.min(35, sIdx));
-    eIdx = Math.max(0, Math.min(35, eIdx));
-
     let fin = State.processedData.financials[cat];
-    let sales = extractPeriodicData(fin['매출액']?.data).slice(sIdx, eIdx + 1);
-    let opProfit = extractPeriodicData(fin['영업이익']?.data).slice(sIdx, eIdx + 1);
+    let salesData = extractPeriodicData(fin['매출액']?.data) || [];
+    let profitData = extractPeriodicData(fin['영업이익']?.data) || [];
 
-    let originalSales = sales.reduce((a, b) => a + b, 0);
-    let originalOpProfit = opProfit.reduce((a, b) => a + b, 0);
+    // Helper to format YYYY.MM
+    const formatYM = (idx) => {
+        let y = 2024 + Math.floor(idx / 12);
+        let m = (idx % 12) + 1;
+        return `${y}.${m.toString().padStart(2, '0')}`;
+    };
 
-    let factor = 1 + (percentChange / 100);
-    let simulatedSales = originalSales * factor;
-    let simulatedOpProfit = originalOpProfit * factor;
-    let profitDiff = simulatedOpProfit - originalOpProfit;
+    const getRate = (idx) => {
+        let y = 2024 + Math.floor(Math.max(0, idx) / 12);
+        let m = (Math.max(0, idx) % 12) + 1;
+        let k = `${y}-${m.toString().padStart(2, '0')}`;
+        
+        // If the exact month has a rate, return it
+        if (State.customRates[k]) return State.customRates[k];
 
-    // Update slider label
-    let rateValText = `${percentChange > 0 ? '+' : ''}${percentChange}%`;
-    if (percentChange === 0) {
-        rateValText += ' (기본환율)';
-        els.simRateVal.style.color = 'var(--text-secondary)';
-    } else {
-        rateValText += percentChange > 0 ? ' (환율 상승 / 원화 약세 / 미화 강세)' : ' (환율 하락 / 원화 강세 / 미화 약세)';
-        els.simRateVal.style.color = percentChange > 0 ? 'var(--accent-green)' : 'var(--accent-red)';
-    }
-    els.simRateVal.innerText = rateValText;
+        // Otherwise, find the most recently available rate (search backwards)
+        for (let i = idx - 1; i >= 0; i--) {
+            let py = 2024 + Math.floor(i / 12);
+            let pm = (i % 12) + 1;
+            let pk = `${py}-${pm.toString().padStart(2, '0')}`;
+            if (State.customRates[pk]) return State.customRates[pk];
+        }
+        
+        // If completely empty, return a reasonable VND/KRW * 100 default (e.g., 5.40)
+        return 5.40;
+    };
 
-    // Update simulated values
-    els.simOpProfit.innerText = formatCurr(simulatedOpProfit);
-    
-    let diffPct = originalOpProfit ? (profitDiff / Math.abs(originalOpProfit) * 100).toFixed(1) : '0.0';
-    let diffText = `${profitDiff >= 0 ? '+' : ''}${formatCurr(profitDiff)} (${profitDiff >= 0 ? '+' : ''}${diffPct}% 변동)`;
-    els.simOpProfitDiff.innerText = diffText;
-    els.simOpProfitDiff.style.color = profitDiff >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+    const analyzePeriod = (curStart, curEnd, prevStart, prevEnd, periodLabel, elPrefix) => {
+        const elPeriod = document.getElementById(`fxPeriod${elPrefix}`);
+        const elRateDiff = document.getElementById(`fxRateDiff${elPrefix}`);
+        const elRateVal = document.getElementById(`fxRateVal${elPrefix}`);
+        const elText = document.getElementById(`fxImpactText${elPrefix}`);
 
-    // Update ApexChart
-    if (State.charts.simTrend) {
-        let simColor = '#06b6d4';
-        if (percentChange > 0) {
-            let lightness = 85 - (percentChange * 4); // 1%일때 81%, 10%일때 45% (점점 짙어짐)
-            simColor = `hsl(158, 84%, ${lightness}%)`; // Green 계열
-        } else if (percentChange < 0) {
-            let lightness = 85 - (Math.abs(percentChange) * 4);
-            simColor = `hsl(0, 84%, ${lightness}%)`; // Red 계열
+        if (!elPeriod) return;
+
+        if (prevStart < 0) {
+            elPeriod.innerText = `${formatYM(Math.max(0, curStart))} ~ ${formatYM(curEnd)}`;
+            elRateDiff.innerText = "-";
+            elRateVal.innerText = "";
+            elText.innerHTML = `<span style="color:var(--text-secondary);">전년/전기 비교를 위한 과거 데이터가 부족합니다.</span>`;
+            return;
         }
 
-        let calcNiceBound = (val) => {
-            if (val === 0) return 0;
-            let absVal = Math.abs(val);
-            let mag = Math.pow(10, Math.floor(Math.log10(absVal)));
-            let fraction = absVal / mag;
-            let niceFraction;
-            if (fraction <= 1) niceFraction = 1;
-            else if (fraction <= 2) niceFraction = 2;
-            else if (fraction <= 5) niceFraction = 5;
-            else niceFraction = 10;
-            let nice = niceFraction * mag;
-            return val < 0 ? -nice : nice;
-        };
+        elPeriod.innerText = `${formatYM(curStart)}`;
 
-        let targetMax = originalOpProfit > 0 ? originalOpProfit * 1.2 : 0;
-        let targetMin = originalOpProfit < 0 ? originalOpProfit * 1.2 : 0;
+        // Calculate average rates
+        let curRateSum = 0;
+        for(let i=curStart; i<=curEnd; i++) curRateSum += getRate(i);
+        let curRateAvg = curRateSum / (curEnd - curStart + 1);
+
+        let prevRateSum = 0;
+        for(let i=prevStart; i<=prevEnd; i++) prevRateSum += getRate(i);
+        let prevRateAvg = prevRateSum / (prevEnd - prevStart + 1);
+
+        let rateDiffPct = ((curRateAvg - prevRateAvg) / prevRateAvg) * 100;
+
+        elRateDiff.innerText = `${rateDiffPct >= 0 ? '+' : ''}${rateDiffPct.toFixed(2)}%`;
+        if (rateDiffPct >= 0) elRateDiff.style.color = 'var(--accent-green)';
+        else elRateDiff.style.color = 'var(--accent-red)';
         
-        let yMax = calcNiceBound(targetMax);
-        let yMin = calcNiceBound(targetMin);
-        if (yMax === 0 && yMin === 0) {
-            yMax = 1000;
+        elRateVal.innerText = `(${prevRateAvg.toFixed(2)}원/동 → ${curRateAvg.toFixed(2)}원/동)`;
+
+        // Calculate Impact for current month
+        let curSales = 0;
+        let curProfit = 0;
+        for(let i=curStart; i<=curEnd; i++) {
+            curSales += salesData[i] || 0;
+            curProfit += profitData[i] || 0;
         }
 
-        State.charts.simTrend.updateOptions({ 
-            colors: ['#06b6d4', simColor],
-            yaxis: { 
-                min: yMin, 
-                max: yMax, 
-                tickAmount: 5,
-                labels: { formatter: (val) => formatShort(val) } 
-            },
-            dataLabels: {
-                enabled: true,
-                formatter: function (val, opts) {
-                    if (opts.dataPointIndex === 1) {
-                        return `${percentChange > 0 ? '+' : ''}${percentChange}%`;
-                    }
-                    return '';
-                },
-                style: {
-                    colors: ['#ffffff'],
-                    fontSize: '12px',
-                    fontWeight: '600'
-                },
-                background: {
-                    enabled: true,
-                    foreColor: '#000000',
-                    padding: 4,
-                    borderRadius: 2,
-                    borderWidth: 0,
-                    opacity: 0.15
-                }
-            }
-        });
-        State.charts.simTrend.updateSeries([{
-            name: '영업이익 (원)',
-            data: [
-                { x: '현재 환율 (0%)', y: Math.round(originalOpProfit) },
-                { x: `가상 환율 (${percentChange > 0 ? '+' : ''}${percentChange}%)`, y: Math.round(simulatedOpProfit) }
-            ]
-        }]);
-    }
+        // Simulated = Actual * (prevRate / curRate)
+        let simSales = curSales * (prevRateAvg / curRateAvg);
+        let simProfit = curProfit * (prevRateAvg / curRateAvg);
 
-    // Update Scenario Table
-    let tableHtml = '';
-    const scenarios = [-10, -5, 0, 5, 10];
-    
-    let rowSales = `<tr><td style="text-align: left; font-weight: 500; padding-left:16px;">매출액</td>`;
-    let rowProfit = `<tr><td style="text-align: left; font-weight: 500; padding-left:16px;">영업이익</td>`;
-    let rowMargin = `<tr><td style="text-align: left; font-weight: 500; padding-left:16px;">영업이익률</td>`;
-    let rowVariance = `<tr><td style="text-align: left; font-weight: 500; padding-left:16px;">영업이익 변동액</td>`;
-
-    scenarios.forEach(sc => {
-        let f = 1 + (sc / 100);
-        let scSales = originalSales * f;
-        let scProfit = originalOpProfit * f;
-        let scMargin = scSales ? (scProfit / scSales * 100).toFixed(1) + '%' : '0.0%';
-        let scVariance = scProfit - originalOpProfit;
-
-        let activeStyle = sc === percentChange ? 'style="background: rgba(6, 182, 212, 0.15); font-weight: bold; color: var(--accent-cyan);"' : '';
-
-        rowSales += `<td ${activeStyle}>${formatShort(scSales)}</td>`;
-        rowProfit += `<td ${activeStyle}>${formatShort(scProfit)}</td>`;
-        rowMargin += `<td ${activeStyle}>${scMargin}</td>`;
+        let salesImpact = curSales - simSales;
+        let profitImpact = curProfit - simProfit;
         
-        let varText = sc === 0 ? '-' : `${scVariance >= 0 ? '+' : ''}${formatShort(scVariance)}`;
-        let varColor = sc === 0 ? 'var(--text-secondary)' : (scVariance >= 0 ? 'var(--accent-green)' : 'var(--accent-red)');
-        let tdStyle = sc === percentChange ? `style="background: rgba(6, 182, 212, 0.15); font-weight: bold; color: ${varColor};"` : `style="color: ${varColor}; font-family:monospace;"`;
-        rowVariance += `<td ${tdStyle}>${varText}</td>`;
-    });
+        const fmtAmt = (amt) => '₩ ' + Math.abs(amt).toLocaleString('ko-KR', {maximumFractionDigits: 0});
 
-    rowSales += '</tr>';
-    rowProfit += '</tr>';
-    rowMargin += '</tr>';
-    rowVariance += '</tr>';
+        let direction = rateDiffPct >= 0 ? '상승(원화 약세)' : '하락(원화 강세)';
+        let impactHtml = `
+            당월(${formatYM(curStart)}) 환율은 ${periodLabel}(${formatYM(prevStart)}~${formatYM(prevEnd)}) 평균 대비 <strong>${Math.abs(rateDiffPct).toFixed(2)}% ${direction}</strong> 하였습니다.<br><br>
+            이에 따라 당월 <strong>매출액은 약 ${fmtAmt(salesImpact)}</strong>, 
+            <strong>영업이익은 약 ${fmtAmt(profitImpact)}</strong> 
+            <span style="color:${profitImpact >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight:bold;">
+                ${profitImpact >= 0 ? '증가' : '감소'}
+            </span>하는 환율 효과가 발생한 것으로 분석됩니다.
+        `;
+        elText.innerHTML = impactHtml;
+    };
 
-    els.simTableBody.innerHTML = rowSales + rowProfit + rowMargin + rowVariance;
+    // 사용자가 선택한 조회 기간(종료월)
+    let selectedIdx = (parseInt(State.ui.endYear) - 2024) * 12 + (parseInt(State.ui.endMonth) - 1);
+    selectedIdx = Math.max(0, Math.min(35, selectedIdx));
+
+    // 선택한 종료월부터 역순으로 탐색하여 실제 실적이 존재하는 월을 '당월'로 설정
+    let latestIdx = selectedIdx;
+    while (latestIdx >= 0 && (!salesData[latestIdx] || salesData[latestIdx] === 0)) {
+        latestIdx--;
+    }
+    if (latestIdx < 0) latestIdx = 0;
+
+    // 1 Year Avg vs Current Month: cur = latestIdx, prev = latestIdx-12 to latestIdx-1
+    analyzePeriod(latestIdx, latestIdx, latestIdx - 12, latestIdx - 1, '직전 1년', '1Y');
+
+    // 3 Months Avg vs Current Month: cur = latestIdx, prev = latestIdx-3 to latestIdx-1
+    analyzePeriod(latestIdx, latestIdx, latestIdx - 3, latestIdx - 1, '직전 3개월', '3M');
 }
 
 function updateRateChart() {
@@ -2546,7 +2567,7 @@ function renderCompSlots() {
         }
     });
     
-    let html = `<tr><th style="min-width: 180px; text-align: center; padding: 16px; font-size: 1.15rem; font-weight: 700; color: var(--text-primary); vertical-align: middle;">비교 항목 (단가 기준)</th>`;
+    let html = `<tr><th style="position: sticky; top: 0; left: 0; z-index: 100; background: var(--bg-base); min-width: 180px; text-align: center; padding: 8px 16px; font-size: 1.1rem; font-weight: 700; color: var(--text-primary); vertical-align: middle; border-top: 1px solid rgba(0,0,0,0.08);">비교 항목 (단가 기준)</th>`;
     for(let i=0; i<5; i++) {
         let mOptions = '';
         for(let m=1; m<=12; m++) {
@@ -2556,9 +2577,9 @@ function renderCompSlots() {
         
         if (i > 0) html += `<th style="width: 16px; min-width: 16px; padding: 0; border: none; background: transparent;"></th>`;
         html += `
-            <th style="min-width: 200px; padding: 16px; vertical-align: top; background: rgba(255,255,255,0.02); border-radius: 6px 6px 0 0;">
-                <div class="filter-group" style="text-align: left;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--accent-cyan); font-size: 0.9rem; text-align: center;">품목 ${i+1}</label>
+            <th style="min-width: 200px; padding: 12px 16px; vertical-align: top; background: rgba(255,255,255,0.02); border-radius: 6px 6px 0 0;">
+                <div class="filter-group" style="text-align: left; gap: 0;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--accent-cyan); font-size: 0.9rem; text-align: center;">품목 ${i+1}</label>
                     <select class="modern-select comp-cat" data-idx="${i}" style="width: 100%; margin-bottom: 8px;">
                         ${catOptions}
                     </select>
@@ -2694,7 +2715,7 @@ function runComparativeAnalysis() {
         if (displayLabel.includes('매출액')) displayLabel = '매출단가';
 
         tbodyHtml += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
-            <td style="text-align: left; padding: 16px; font-weight: 600; color: var(--accent-cyan); border-right: 1px solid rgba(255,255,255,0.05);">${displayLabel}</td>`;
+            <td style="text-align: left; padding: 8px 16px; font-weight: 600; color: var(--accent-cyan); border-right: 1px solid rgba(255,255,255,0.05);">${displayLabel}</td>`;
 
         allSlots.forEach((slot, idx) => {
             if (idx > 0) tbodyHtml += `<td style="width: 16px; min-width: 16px; padding: 0; border: none; background: transparent;"></td>`;
@@ -2757,7 +2778,7 @@ function runComparativeAnalysis() {
                     }
                 }
             }
-            tbodyHtml += `<td style="text-align: right; padding: 16px; background: rgba(255,255,255,0.01);">${cellValue}</td>`;
+            tbodyHtml += `<td style="text-align: right; padding: 8px 16px; background: rgba(255,255,255,0.01);">${cellValue}</td>`;
         });
         tbodyHtml += `</tr>`;
     });
