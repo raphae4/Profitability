@@ -591,7 +591,9 @@ function parseWorkbook(workbook) {
     for (let r = 0; r < Math.min(10, salesSheet.length); r++) {
         let tempIndices = [];
         for (let c = 0; c < salesSheet[r].length; c++) {
-            if (String(salesSheet[r][c]).replace(/\s+/g, '') === '1월') {
+            let cleanVal = String(salesSheet[r][c]).replace(/\s+/g, '');
+            // 정규식을 사용하여 11월을 1월로 잘못 인식하는 11월 버그 완벽 차단
+            if (/^1월(실적|계획|목표)?$/.test(cleanVal)) {
                 tempIndices.push(c);
             }
         }
@@ -620,7 +622,7 @@ function parseWorkbook(workbook) {
         else if (rowStr.includes('계획') && !rowStr.includes('실적')) lastMajorSection = '계획';
         
         // Find the Volume section header
-        if (rowStr.includes('매출수량') || rowStr.includes('K/EA') || rowStr.includes('KEA')) {
+        if (rowStr.includes('매출수량') || rowStr.includes('K/EA') || rowStr.includes('(KEA)')) {
             readingVolumes = true;
             readingVolumesHeaderStr = rowStr + '_' + lastMajorSection;
             continue;
@@ -644,7 +646,7 @@ function parseWorkbook(workbook) {
                 let val = row[checkCol];
                 if (val !== undefined && val !== null && val !== '') {
                     let valClean = String(val).replace(/\s+/g, '').toLowerCase();
-                    let valCore = valClean.replace(/_kg|kg$/, '');
+                    let valCore = valClean.replace(/\(.*?\)/g, '').replace(/_kg|kg$/, '');
                     let vNorm = valCore.replace(/[^a-z0-9가-힣]/g, '');
 
                     let matchedCat = null;
@@ -667,7 +669,7 @@ function parseWorkbook(workbook) {
                         let potentialMatches = pData.categories.filter(c => {
                             if (c === pData.totalCompany) return false; // Prevent total company from hijacking
                             let cClean = c.replace(/\s+/g, '').toLowerCase();
-                            let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
+                            let cCore = cClean.replace(/\(.*?\)/g, '').replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
                             let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
                             return vNorm.length >= 4 && cNorm.includes(vNorm);
                         });
@@ -682,7 +684,7 @@ function parseWorkbook(workbook) {
                         let potentialMatches = pData.categories.filter(c => {
                             if (c === pData.totalCompany) return false; // Prevent total company from hijacking
                             let cClean = c.replace(/\s+/g, '').toLowerCase();
-                            let cCore = cClean.replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
+                            let cCore = cClean.replace(/\(.*?\)/g, '').replace(/^mobile\(/, '').replace(/\)$/, '').replace(/^press\(/, '').replace(/\)$/, '');
                             let cNorm = cCore.replace(/[^a-z0-9가-힣]/g, '');
                             return cNorm.length >= 4 && vNorm.includes(cNorm);
                         });
@@ -802,10 +804,13 @@ function parseWorkbook(workbook) {
                 let convertedRow = row.map((val, colIdx) => {
                     if (colIdx === 0) return val;
                     
-                    let rate = 5.3;
                     let mKey = colRatesMapping[colIdx];
-                    if (mKey && State.customRates[mKey] > 0) {
-                        rate = State.customRates[mKey];
+                    // 사용자가 직접 입력/저장한 환율이 있는지 확인
+                    let rate = (mKey && State.customRates[mKey] > 0) ? State.customRates[mKey] : null;
+
+                    // 기본 환율 5.3(UI 제공용)은 유지하되, 환율 미입력 달은 계산 제외(0원 처리)
+                    if (!rate) {
+                        return 0;
                     }
 
                     let numVal = Number(String(val).replace(/,/g,'').trim());
@@ -1337,9 +1342,15 @@ function updateUnitAnalysis() {
     }
 
     let periodLength = eIdx - sIdx + 1;
+    let volCat = cat;
+    Object.keys(State.processedData.volumes).forEach(vk => {
+        let baseVk = vk.replace(/\(.*\)/, '');
+        if (cat.includes(baseVk)) volCat = vk;
+    });
+
     let volArr = new Array(periodLength).fill(0);
-    if (State.processedData.volumes[cat] && State.processedData.volumes[cat].reduce((a,b)=>a+b, 0) > 0) {
-        volArr = State.processedData.volumes[cat].slice(sIdx, eIdx + 1);
+    if (State.processedData.volumes[volCat] && State.processedData.volumes[volCat].reduce((a,b)=>a+b, 0) > 0) {
+        volArr = State.processedData.volumes[volCat].slice(sIdx, eIdx + 1);
     } else if (cat === State.processedData.totalCompany) {
         volArr = new Array(periodLength).fill(0);
         Object.keys(State.processedData.volumes).forEach(k => {
@@ -1502,7 +1513,9 @@ function updateUnitAnalysis() {
                 let isAvg = (idx === series.data.length - 1);
                 let rev = State.currentUnitRev[idx];
                 let ratioStr = '';
-                if (series.name !== '매출액' && rev && rev > 0) {
+                if (series.name === '매출액' || val === 0 || !rev || rev === 0) {
+                    if (series.name !== '매출액') ratioStr = '-';
+                } else {
                     ratioStr = ((val / rev) * 100).toFixed(1) + '%';
                 }
                 let cellColor = isAvg ? 'color: var(--accent-cyan); font-weight: 500;' : '';
@@ -2428,7 +2441,10 @@ function setStatus(isOk, text) {
 }
 function formatCurr(val) { return '₩ ' + Math.round(val).toLocaleString('ko-KR'); }
 function formatNum(val) { return Math.round(val).toLocaleString('ko-KR'); }
-function formatUnit(val) { return Number(val).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+function formatUnit(val) { 
+    if (val === 0 || val === null || isNaN(val)) return '-';
+    return Number(val).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); 
+}
 function formatShort(val) {
     let abs = Math.abs(val);
     let sign = val < 0 ? '-' : '';
